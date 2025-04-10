@@ -1,8 +1,83 @@
-# Warehouse Management Telegram Bot
+# Telegram-бот для управления складом
 
-Telegram bot for warehouse management, production tracking, and sales management.
+Телеграм-бот для управления складом, производством и продажами.
 
-[![Deploy](https://www.herokucdn.com/deploy/button.svg)](https://heroku.com/deploy)
+## Быстрый деплой на Heroku
+
+[![Deploy to Heroku](https://www.herokucdn.com/deploy/button.svg)](https://heroku.com/deploy?template=https://github.com/numikok/warehouse-telegram-bot)
+
+## Переменные окружения
+
+Для работы бота необходимо настроить следующие переменные окружения:
+
+- `BOT_TOKEN` - токен Telegram-бота от BotFather
+- `ADMIN_USER_ID` - ID пользователя Telegram для роли Супер-админа
+- `DATABASE_URL` - URL подключения к базе данных PostgreSQL
+- `HEROKU` - флаг, указывающий на запуск на Heroku (установите в "1")
+
+## Установка и запуск
+
+### Локальный запуск
+
+1. Клонируйте репозиторий
+```
+git clone https://github.com/numikok/warehouse-telegram-bot.git
+cd warehouse-telegram-bot
+```
+
+2. Создайте файл `.env` с переменными окружения
+```
+BOT_TOKEN=ваш_токен_бота
+ADMIN_USER_ID=ваш_id_в_телеграм
+DATABASE_URL=postgresql://user:password@localhost/db_name
+```
+
+3. Установите зависимости
+```
+pip install -r requirements.txt
+```
+
+4. Запустите бота
+```
+python main.py
+```
+
+### Деплой на Heroku вручную
+
+1. Создайте приложение на Heroku
+```
+heroku create имя-вашего-приложения
+```
+
+2. Добавьте базу данных PostgreSQL
+```
+heroku addons:create heroku-postgresql:hobby-dev
+```
+
+3. Настройте переменные окружения
+```
+heroku config:set BOT_TOKEN=ваш_токен_бота
+heroku config:set ADMIN_USER_ID=ваш_id_в_телеграм
+heroku config:set HEROKU=1
+```
+
+4. Деплой на Heroku
+```
+git push heroku main
+```
+
+5. Запустите приложение
+```
+heroku ps:scale web=1
+```
+
+## Роли в системе
+
+- **Супер-администратор** - полный доступ ко всем функциям
+- **Менеджер по продажам** - создание заказов, проверка наличия товаров
+- **Производство** - регистрация поступления сырья, производство панелей
+- **Склад** - контроль остатков, комплектация заказов
+- **Ожидание роли** - пользователь ждет назначения роли
 
 ## Features
 
@@ -70,4 +145,4 @@ The bot uses PostgreSQL with the following main tables:
 - `/приход` - Record incoming materials (Production)
 - `/производство` - Record production (Production)
 - `/продажа` - Create sales order (Sales Manager)
-- `/отчет` - Generate reports (Super Admin) # warehouse-telegram-bot
+- `/отчет` - Generate reports (Super Admin)

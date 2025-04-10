@@ -1,34 +1,33 @@
 {
-  "name": "Warehouse Management Telegram Bot",
-  "description": "Telegram bot for warehouse management, production tracking, and sales management",
-  "repository": "https://github.com/your-username/your-repo",
-  "keywords": ["python", "telegram", "bot", "warehouse", "management"],
+  "name": "Warehouse Telegram Bot",
+  "description": "Telegram bot for warehouse management",
+  "repository": "https://github.com/numikok/warehouse-telegram-bot",
+  "keywords": ["python", "telegram", "bot", "warehouse"],
   "env": {
     "BOT_TOKEN": {
-      "description": "Telegram Bot Token from BotFather",
+      "description": "Your Telegram Bot Token from BotFather",
+      "value": "",
       "required": true
     },
     "ADMIN_USER_ID": {
-      "description": "Telegram User ID of the admin (for automatic SUPER_ADMIN role assignment)",
+      "description": "Telegram User ID of the Super Admin",
+      "value": "",
       "required": true
     },
     "HEROKU": {
-      "description": "Flag to indicate that the app is running on Heroku",
-      "value": "1"
+      "description": "Flag to indicate running on Heroku",
+      "value": "1",
+      "required": true
     }
   },
   "addons": [
-    "heroku-postgresql:hobby-dev"
+    {
+      "plan": "heroku-postgresql:hobby-dev"
+    }
   ],
   "buildpacks": [
     {
       "url": "heroku/python"
     }
-  ],
-  "formation": {
-    "worker": {
-      "quantity": 1,
-      "size": "free"
-    }
-  }
+  ]
 } 

@@ -7,8 +7,8 @@ from aiogram.filters import Command
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
-from database import get_db
-from models import User, UserRole
+from database import get_db, engine
+from models import Base, User, UserRole, Operation, OperationType, OrderStatus
 from handlers import (
     admin,
     production,
@@ -26,6 +26,7 @@ from navigation import get_role_keyboard, MenuState
 import http.server
 import socketserver
 import threading
+from flask import Flask
 
 # Load environment variables
 load_dotenv()
@@ -50,6 +51,17 @@ dp.include_router(warehouse.router)
 dp.include_router(production_orders.router)
 dp.include_router(orders.router)
 dp.include_router(back_handler.router)
+
+# Создаем Flask приложение
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Бот запущен и работает!"
+
+def run_flask():
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
 
 @dp.message(Command("start"))
 async def cmd_start(message: Message, state: FSMContext):
@@ -452,38 +464,27 @@ async def button_completed_orders(message: Message, state: FSMContext):
 async def button_shipping_orders(message: Message, state: FSMContext):
     await super_admin.handle_shipping_orders(message, state)
 
-# Простой веб-сервер для Heroku (чтобы приложение не усыплялось)
-def run_http_server():
-    PORT = int(os.getenv("PORT", 8080))
-    
-    class Handler(http.server.SimpleHTTPRequestHandler):
-        def do_GET(self):
-            self.send_response(200)
-            self.send_header('Content-type', 'text/html')
-            self.end_headers()
-            self.wfile.write(b'Bot is running!')
-            return
-    
-    with socketserver.TCPServer(("", PORT), Handler) as httpd:
-        logging.info(f"Web server running on port {PORT}")
-        httpd.serve_forever()
-
 # Основная функция запуска бота
 async def main():
-    logging.info("Starting bot...")
-    
-    # Запуск веб-сервера в отдельном потоке (для Heroku)
-    if os.getenv("HEROKU", "0") == "1":
-        threading.Thread(target=run_http_server, daemon=True).start()
-    
-    # Запуск бота в режиме polling
-    await dp.start_polling(bot)
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+        await dp.start_polling(bot)
+    finally:
+        await bot.session.close()
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except (KeyboardInterrupt, SystemExit):
-        logging.info("Bot stopped!")
-    except Exception as e:
-        logging.error(f"Error: {e}")
-        raise 
+    # Создание таблиц, если они не существуют
+    Base.metadata.create_all(engine)
+    
+    # Создание дефолтного пользователя-админа
+    create_default_user_if_not_exists()
+    
+    # Запускаем Flask-сервер в отдельном потоке, если мы на Heroku
+    if os.getenv("HEROKU", "0") == "1":
+        flask_thread = threading.Thread(target=run_flask)
+        flask_thread.daemon = True
+        flask_thread.start()
+        logging.info("Запущен веб-сервер Flask для Heroku")
+    
+    # Запускаем бота
+    asyncio.run(main()) 
