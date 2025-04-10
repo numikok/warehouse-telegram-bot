@@ -70,4 +70,4 @@ The bot uses PostgreSQL with the following main tables:
 - `/приход` - Record incoming materials (Production)
 - `/производство` - Record production (Production)
 - `/продажа` - Create sales order (Sales Manager)
-- `/отчет` - Generate reports (Super Admin) 
+- `/отчет` - Generate reports (Super Admin) # warehouse-telegram-bot
