@@ -340,8 +340,8 @@ async def handle_joint_defect(message: Message, state: FSMContext):
     await state.update_data(defect_type="joint")
     await state.set_state(ProductionStates.waiting_for_defect_joint_type)
 
-# Специальный обработчик для брака панелей - Using higher priority to ensure it's called first
-@router.message(ProductionStates.waiting_for_defect_type, F.text.contains("Панель"))
+# Специальный обработчик для брака панелей
+@router.message(ProductionStates.waiting_for_defect_type, F.text == "🪵 Панель")
 async def handle_panel_defect(message: Message, state: FSMContext):
     logging.info("Специальный обработчик для брака панелей вызван")
     
