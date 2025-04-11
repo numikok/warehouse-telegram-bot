@@ -145,6 +145,45 @@ async def handle_materials_income(message: Message, state: FSMContext):
         reply_markup=get_menu_keyboard(MenuState.PRODUCTION_MATERIALS)
     )
 
+# Специальный обработчик для брака панелей - перемещен выше для приоритета
+@router.message(ProductionStates.waiting_for_defect_type, F.text == "🪵 Панель")
+async def handle_panel_defect(message: Message, state: FSMContext):
+    logging.info("Специальный обработчик для брака панелей вызван")
+    
+    # Проверяем, что мы действительно находимся в состоянии ожидания типа брака
+    current_state = await state.get_state()
+    logging.info(f"Текущее состояние: {current_state}")
+    
+    if current_state != ProductionStates.waiting_for_defect_type:
+        logging.warning(f"Вызов handle_panel_defect в неправильном состоянии: {current_state}")
+        return
+    
+    db = next(get_db())
+    try:
+        # Получаем текущий остаток панелей
+        panel = db.query(Panel).first()
+        if not panel or panel.quantity <= 0:
+            logging.warning("В базе нет панелей")
+            await message.answer(
+                "В базе нет панелей.",
+                reply_markup=get_menu_keyboard(MenuState.PRODUCTION_MAIN)
+            )
+            return
+        
+        await message.answer(
+            f"Введите количество бракованных панелей:\n\nДоступно: {panel.quantity} шт.",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="◀️ Назад")]],
+                resize_keyboard=True
+            )
+        )
+    finally:
+        db.close()
+    
+    # Четко указываем, что это панель для дефекта
+    await state.update_data(defect_type="panel_defect")
+    await state.set_state(ProductionStates.waiting_for_defect_panel_quantity)
+
 # Обработка прихода пустых панелей
 @router.message(F.text == "🪵 Панель")
 async def handle_panel(message: Message, state: FSMContext):
@@ -157,7 +196,7 @@ async def handle_panel(message: Message, state: FSMContext):
     
     # Если мы в меню выбора типа брака, пропускаем эту обработку
     if current_state == ProductionStates.waiting_for_defect_type:
-        logging.info("Пропускаем обработку обычной панели, так как находимся в меню брака")
+        logging.info("Пропускаем обработку в handle_panel, так как находимся в меню брака. Будет вызван handle_panel_defect.")
         return
     
     # Если мы не в меню материалов, пропускаем обработку
@@ -340,41 +379,7 @@ async def handle_joint_defect(message: Message, state: FSMContext):
     await state.update_data(defect_type="joint")
     await state.set_state(ProductionStates.waiting_for_defect_joint_type)
 
-# Специальный обработчик для брака панелей
-@router.message(ProductionStates.waiting_for_defect_type, F.text == "🪵 Панель")
-async def handle_panel_defect(message: Message, state: FSMContext):
-    logging.info("Специальный обработчик для брака панелей вызван")
-    
-    # Проверяем, что мы действительно находимся в состоянии ожидания типа брака
-    current_state = await state.get_state()
-    logging.info(f"Текущее состояние: {current_state}")
-    
-    if current_state != ProductionStates.waiting_for_defect_type:
-        logging.warning(f"Вызов handle_panel_defect в неправильном состоянии: {current_state}")
-        return
-    
-    db = next(get_db())
-    try:
-        # Получаем текущий остаток панелей
-        panel = db.query(Panel).first()
-        if not panel or panel.quantity <= 0:
-            logging.warning("В базе нет панелей")
-            await message.answer(
-                "В базе нет панелей.",
-                reply_markup=get_menu_keyboard(MenuState.PRODUCTION_MAIN)
-            )
-            return
-        
-        await message.answer(
-            f"Введите количество бракованных панелей:\n\nДоступно: {panel.quantity} шт.",
-            reply_markup=ReplyKeyboardMarkup(
-                keyboard=[[KeyboardButton(text="◀️ Назад")]],
-                resize_keyboard=True
-            )
-        )
-    finally:
-        db.close()
-    
+# Специальный обработчик для брака панелей - УДАЛЯЕМ ЭТОТ ДУБЛИКАТ
     # Четко указываем, что это панель для дефекта
     await state.update_data(defect_type="panel_defect")
     await state.set_state(ProductionStates.waiting_for_defect_panel_quantity)
