@@ -151,6 +151,15 @@ async def handle_panel(message: Message, state: FSMContext):
     if not await check_production_access(message):
         return
     
+    # Проверяем, что мы находимся в состоянии добавления материалов
+    current_state = await state.get_state()
+    logging.info(f"Нажата кнопка 'Панель', текущее состояние: {current_state}")
+    
+    # Если мы не в меню материалов, пропускаем обработку
+    if current_state != MenuState.PRODUCTION_MATERIALS:
+        logging.info(f"Пропускаем обработку, так как не в режиме добавления материалов")
+        return
+    
     # Запрашиваем количество пустых панелей
     keyboard = ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="◀️ Назад")]],
@@ -162,6 +171,7 @@ async def handle_panel(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
     
+    await state.update_data(operation_type="panel_income") # Указываем тип операции явно
     await state.set_state(ProductionStates.waiting_for_panel_quantity)
 
 @router.message(ProductionStates.waiting_for_panel_quantity)
@@ -178,6 +188,15 @@ async def process_panel_quantity(message: Message, state: FSMContext):
             await message.answer("Количество панелей должно быть положительным числом.")
             return
         
+        # Проверяем, что мы в правильном контексте обработки прихода
+        data = await state.get_data()
+        operation_type = data.get("operation_type", "")
+        if operation_type != "panel_income":
+            logging.warning(f"Неправильный тип операции: {operation_type}")
+            await message.answer("Произошла ошибка. Пожалуйста, начните процесс заново.")
+            await state.set_state(MenuState.PRODUCTION_MAIN)
+            return
+            
         db = next(get_db())
         try:
             # Получаем пользователя из базы данных
@@ -203,7 +222,8 @@ async def process_panel_quantity(message: Message, state: FSMContext):
                 quantity=quantity,
                 details=json.dumps({
                     "previous_quantity": previous_quantity,
-                    "new_quantity": panel.quantity
+                    "new_quantity": panel.quantity,
+                    "is_income": True  # Указываем, что это операция прихода
                 })
             )
             
@@ -320,6 +340,12 @@ async def handle_joint_defect(message: Message, state: FSMContext):
 async def handle_panel_defect(message: Message, state: FSMContext):
     logging.info("Специальный обработчик для брака панелей вызван")
     
+    # Проверяем, что мы действительно находимся в состоянии ожидания типа брака
+    current_state = await state.get_state()
+    if current_state != ProductionStates.waiting_for_defect_type:
+        logging.warning(f"Вызов handle_panel_defect в неправильном состоянии: {current_state}")
+        return
+    
     db = next(get_db())
     try:
         # Получаем текущий остаток панелей
@@ -342,7 +368,7 @@ async def handle_panel_defect(message: Message, state: FSMContext):
     finally:
         db.close()
     
-    await state.update_data(defect_type="panel")
+    await state.update_data(defect_type="panel_defect") # Уточняем тип дефекта
     await state.set_state(ProductionStates.waiting_for_defect_panel_quantity)
 
 # Специальный обработчик для брака клея
@@ -1540,6 +1566,15 @@ async def process_defect_panel_quantity(message: Message, state: FSMContext):
             await message.answer("Количество должно быть положительным числом.")
             return
         
+        # Проверяем, что мы в правильном контексте обработки брака
+        data = await state.get_data()
+        defect_type = data.get("defect_type", "")
+        if defect_type != "panel_defect":
+            logging.warning(f"Неправильный тип дефекта: {defect_type}")
+            await message.answer("Произошла ошибка. Пожалуйста, начните процесс заново.")
+            await state.set_state(MenuState.PRODUCTION_MAIN)
+            return
+            
         db = next(get_db())
         try:
             panel = db.query(Panel).first()
@@ -1556,19 +1591,22 @@ async def process_defect_panel_quantity(message: Message, state: FSMContext):
             # Получаем пользователя из базы данных
             user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
             
+            # Уменьшаем количество панелей
+            previous_quantity = panel.quantity
+            panel.quantity -= quantity
+            
             # Создаем запись операции
             operation = Operation(
                 user_id=user.id,
-                operation_type="panel_defect",
+                operation_type="panel_defect_subtract",  # Явно указываем, что это вычитание для брака
                 quantity=quantity,
                 details=json.dumps({
-                    "previous_quantity": panel.quantity
+                    "previous_quantity": previous_quantity,
+                    "new_quantity": panel.quantity,
+                    "is_defect": True  # Указываем, что это операция брака
                 })
             )
             db.add(operation)
-            
-            # Уменьшаем количество панелей
-            panel.quantity -= quantity
             db.commit()
             
             await message.answer(
