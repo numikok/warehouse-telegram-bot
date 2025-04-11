@@ -155,6 +155,11 @@ async def handle_panel(message: Message, state: FSMContext):
     current_state = await state.get_state()
     logging.info(f"Нажата кнопка 'Панель', текущее состояние: {current_state}")
     
+    # Если мы в меню выбора типа брака, пропускаем эту обработку
+    if current_state == ProductionStates.waiting_for_defect_type:
+        logging.info("Пропускаем обработку обычной панели, так как находимся в меню брака")
+        return
+    
     # Если мы не в меню материалов, пропускаем обработку
     if current_state != MenuState.PRODUCTION_MATERIALS:
         logging.info(f"Пропускаем обработку, так как не в режиме добавления материалов")
@@ -335,13 +340,15 @@ async def handle_joint_defect(message: Message, state: FSMContext):
     await state.update_data(defect_type="joint")
     await state.set_state(ProductionStates.waiting_for_defect_joint_type)
 
-# Специальный обработчик для брака панелей
-@router.message(ProductionStates.waiting_for_defect_type, F.text == "🪵 Панель")
+# Специальный обработчик для брака панелей - Using higher priority to ensure it's called first
+@router.message(ProductionStates.waiting_for_defect_type, F.text.contains("Панель"))
 async def handle_panel_defect(message: Message, state: FSMContext):
     logging.info("Специальный обработчик для брака панелей вызван")
     
     # Проверяем, что мы действительно находимся в состоянии ожидания типа брака
     current_state = await state.get_state()
+    logging.info(f"Текущее состояние: {current_state}")
+    
     if current_state != ProductionStates.waiting_for_defect_type:
         logging.warning(f"Вызов handle_panel_defect в неправильном состоянии: {current_state}")
         return
@@ -368,7 +375,8 @@ async def handle_panel_defect(message: Message, state: FSMContext):
     finally:
         db.close()
     
-    await state.update_data(defect_type="panel_defect") # Уточняем тип дефекта
+    # Четко указываем, что это панель для дефекта
+    await state.update_data(defect_type="panel_defect")
     await state.set_state(ProductionStates.waiting_for_defect_panel_quantity)
 
 # Специальный обработчик для брака клея
@@ -1368,14 +1376,28 @@ async def handle_defect(message: Message, state: FSMContext):
         logging.warning("Отказано в доступе к функциональности брака")
         return
     
+    # Сбрасываем любые предыдущие данные в состоянии, которые могли остаться
+    await state.clear()
+    
     logging.info("Устанавливаю состояние PRODUCTION_DEFECT")
     await state.set_state(MenuState.PRODUCTION_DEFECT)
+    
+    # Формируем клавиатуру для выбора типа брака
+    keyboard = get_menu_keyboard(MenuState.PRODUCTION_DEFECT)
+    logging.info(f"Сформирована клавиатура: {keyboard}")
+    
     await message.answer(
         "Выберите тип брака:",
-        reply_markup=get_menu_keyboard(MenuState.PRODUCTION_DEFECT)
+        reply_markup=keyboard
     )
+    
     logging.info("Устанавливаю состояние waiting_for_defect_type")
     await state.set_state(ProductionStates.waiting_for_defect_type)
+    
+    # Сохраняем информацию о том, что мы в режиме обработки брака
+    await state.update_data(context="defect_processing")
+    
+    logging.info(f"Текущее состояние после всех изменений: {await state.get_state()}")
 
 # Обработчик для кнопки "Назад" и других нераспознанных сообщений в состоянии waiting_for_defect_type
 @router.message(ProductionStates.waiting_for_defect_type)
@@ -1552,7 +1574,10 @@ async def process_defect_joint_quantity(message: Message, state: FSMContext):
 
 @router.message(ProductionStates.waiting_for_defect_panel_quantity)
 async def process_defect_panel_quantity(message: Message, state: FSMContext):
+    logging.info(f"Обработка количества бракованных панелей: '{message.text}'")
+    
     if message.text == "◀️ Назад":
+        logging.info("Пользователь нажал Назад")
         await message.answer(
             "Выберите тип брака:",
             reply_markup=get_menu_keyboard(MenuState.PRODUCTION_DEFECT)
@@ -1568,6 +1593,8 @@ async def process_defect_panel_quantity(message: Message, state: FSMContext):
         
         # Проверяем, что мы в правильном контексте обработки брака
         data = await state.get_data()
+        logging.info(f"Текущие данные состояния: {data}")
+        
         defect_type = data.get("defect_type", "")
         if defect_type != "panel_defect":
             logging.warning(f"Неправильный тип дефекта: {defect_type}")
@@ -1579,10 +1606,12 @@ async def process_defect_panel_quantity(message: Message, state: FSMContext):
         try:
             panel = db.query(Panel).first()
             if not panel:
+                logging.warning("В базе не найдены панели")
                 await message.answer("В базе нет панелей.")
                 return
             
             if panel.quantity < quantity:
+                logging.warning(f"Недостаточно панелей: запрошено {quantity}, доступно {panel.quantity}")
                 await message.answer(
                     f"Невозможно списать {quantity} панелей, доступно только {panel.quantity}."
                 )
@@ -1594,6 +1623,7 @@ async def process_defect_panel_quantity(message: Message, state: FSMContext):
             # Уменьшаем количество панелей
             previous_quantity = panel.quantity
             panel.quantity -= quantity
+            logging.info(f"Списываем {quantity} панелей. Было: {previous_quantity}, стало: {panel.quantity}")
             
             # Создаем запись операции
             operation = Operation(
@@ -1606,22 +1636,28 @@ async def process_defect_panel_quantity(message: Message, state: FSMContext):
                     "is_defect": True  # Указываем, что это операция брака
                 })
             )
+            logging.info(f"Создаю запись операции: {operation.operation_type}, количество: {operation.quantity}")
+            
             db.add(operation)
             db.commit()
+            logging.info("Операция успешно записана в БД")
             
             await message.answer(
                 f"✅ Списано {quantity} бракованных панелей\n"
                 f"Остаток: {panel.quantity} шт.",
                 reply_markup=get_menu_keyboard(MenuState.PRODUCTION_MAIN)
             )
+            logging.info("Отправлено сообщение об успешном списании")
             
         finally:
             db.close()
             
     except ValueError:
+        logging.warning(f"Введено некорректное значение: '{message.text}'")
         await message.answer("Пожалуйста, введите целое число.")
         return
     
+    logging.info("Сбрасываю состояние")
     await state.clear()
 
 @router.message(ProductionStates.waiting_for_defect_film_color)
