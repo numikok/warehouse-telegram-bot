@@ -464,6 +464,40 @@ async def button_completed_orders(message: Message, state: FSMContext):
 async def button_shipping_orders(message: Message, state: FSMContext):
     await super_admin.handle_shipping_orders(message, state)
 
+# Function to create default admin user if not exists
+def create_default_user_if_not_exists():
+    try:
+        admin_id = int(os.getenv("ADMIN_USER_ID", 0))
+        if admin_id == 0:
+            logging.warning("ADMIN_USER_ID is not set or is 0. Skip creating default admin user.")
+            return
+        
+        db = next(get_db())
+        try:
+            # Check if admin user already exists
+            user = db.query(User).filter(User.telegram_id == admin_id).first()
+            if not user:
+                # Create new admin user
+                logging.info(f"Creating default admin user with ID {admin_id}")
+                user = User(
+                    telegram_id=admin_id,
+                    username="admin",  # Will be updated when admin interacts with bot
+                    role=UserRole.SUPER_ADMIN
+                )
+                db.add(user)
+                db.commit()
+                logging.info("Default admin user created successfully")
+            else:
+                # Ensure existing user has SUPER_ADMIN role
+                if user.role != UserRole.SUPER_ADMIN:
+                    user.role = UserRole.SUPER_ADMIN
+                    db.commit()
+                    logging.info(f"Updated user {admin_id} role to SUPER_ADMIN")
+        finally:
+            db.close()
+    except Exception as e:
+        logging.error(f"Error creating default admin user: {e}")
+
 # Основная функция запуска бота
 async def main():
     try:
