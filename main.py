@@ -8,7 +8,7 @@ from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKey
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
 from database import get_db, engine
-from models import Base, User, UserRole, Operation, OperationType, OrderStatus
+from models import Base, User, UserRole, Operation, OrderStatus
 from handlers import (
     admin,
     production,
