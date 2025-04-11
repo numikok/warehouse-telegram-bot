@@ -19,6 +19,12 @@ class JointType(enum.Enum):
     SIMPLE = "simple"      # Простые
     CLOSING = "closing"    # Замыкающие
 
+class OperationType(enum.Enum):
+    INCOME = "INCOME"
+    PRODUCTION = "PRODUCTION"
+    SALE = "SALE"
+    WAREHOUSE = "WAREHOUSE"
+
 class User(Base):
     __tablename__ = "users"
     
