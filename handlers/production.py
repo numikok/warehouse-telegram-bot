@@ -21,48 +21,6 @@ logging.basicConfig(level=logging.INFO)
 
 router = Router()
 
-class ProductionStates(StatesGroup):
-    # Состояния для прихода пустых панелей
-    waiting_for_panel_quantity = State()
-    
-    # Состояния для прихода пленки
-    waiting_for_film_color = State()
-    waiting_for_film_code = State()
-    waiting_for_film_quantity = State()
-    waiting_for_film_meters = State()
-    waiting_for_film_thickness = State()
-    waiting_for_roll_count = State()
-    waiting_for_roll_length = State()
-    waiting_for_panel_consumption = State()
-    
-    # Состояния для прихода стыков
-    waiting_for_joint_type = State()
-    waiting_for_joint_color = State()
-    waiting_for_joint_thickness = State()
-    waiting_for_joint_quantity = State()
-    
-    # Состояния для прихода клея
-    waiting_for_glue_quantity = State()
-    
-    # Состояния для производства
-    waiting_for_production_film_color = State()
-    waiting_for_production_quantity = State()
-
-    # Состояния для управления заказами
-    waiting_for_order_id_to_complete = State()
-
-    # Состояния для учета брака
-    waiting_for_defect_type = State()  # Выбор типа брака (панель/пленка/стык/клей)
-    waiting_for_defect_joint_type = State()  # Тип стыка для брака
-    waiting_for_defect_joint_color = State()  # Цвет стыка для брака
-    waiting_for_defect_joint_thickness = State()  # Толщина стыка для брака
-    waiting_for_defect_joint_quantity = State()  # Количество бракованных стыков
-    waiting_for_defect_panel_quantity = State()  # Количество бракованных панелей
-    waiting_for_defect_film_color = State()  # Цвет бракованной пленки
-    waiting_for_defect_film_thickness = State()  # Толщина бракованной пленки
-    waiting_for_defect_film_meters = State()  # Метраж бракованной пленки
-    waiting_for_defect_glue_quantity = State()  # Количество бракованного клея
-
 async def check_production_access(message: Message) -> bool:
     db = next(get_db())
     try:
@@ -243,12 +201,12 @@ async def handle_panel(message: Message, state: FSMContext):
     
     # Если мы в меню выбора типа брака, пропускаем эту обработку
     if current_state == ProductionStates.waiting_for_defect_type:
-        logging.info("Пропускаем обработку в handle_panel, так как находимся в меню брака. Будет вызван handle_panel_defect.")
+        logging.info("Пропускаем обработку в handle_panel, так как находимся в меню брака. Ожидаем вызов handle_panel_defect.")
         return
     
     # Если мы не в меню материалов, пропускаем обработку
     if current_state != MenuState.PRODUCTION_MATERIALS:
-        logging.info(f"Пропускаем обработку, так как не в режиме добавления материалов")
+        logging.info(f"Пропускаем обработку, так как не в режиме добавления материалов. Текущее состояние: {current_state}")
         return
     
     # Запрашиваем количество пустых панелей
@@ -1761,7 +1719,32 @@ async def process_defect_film_color(message: Message, state: FSMContext):
 @router.message(ProductionStates.waiting_for_defect_film_thickness)
 async def process_defect_film_thickness(message: Message, state: FSMContext):
     if message.text == "◀️ Назад":
-        await handle_defect_film_color(message, state)
+        # Get the stored film color data
+        data = await state.get_data()
+        film_color = data.get('defect_film_color', '')
+        
+        # Go back to color selection
+        await state.set_state(ProductionStates.waiting_for_defect_film_color)
+        
+        db = next(get_db())
+        try:
+            # Получаем список всех цветов пленки
+            films = db.query(Film).all()
+            films_list = [f"- {film.code} (остаток: {film.total_remaining} м)" for film in films]
+            
+            # Создаем клавиатуру для назад
+            keyboard = ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="◀️ Назад")]],
+                resize_keyboard=True
+            )
+            
+            films_text = "\n".join(films_list)
+            await message.answer(
+                f"Выберите цвет/код бракованной пленки из списка:\n\nДоступные варианты:\n{films_text}",
+                reply_markup=keyboard
+            )
+        finally:
+            db.close()
         return
     
     try:
@@ -1771,24 +1754,24 @@ async def process_defect_film_thickness(message: Message, state: FSMContext):
             return
         
         # Сохраняем толщину пленки
-        await state.update_data(film_thickness=thickness)
+        await state.update_data(defect_film_thickness=thickness)
         
-        # Получаем код пленки из состояния
+        # Получаем цвет пленки из состояния
         data = await state.get_data()
-        film_code = data.get('film_code')
+        film_color = data.get('defect_film_color')
         
-        # Запрашиваем количество рулонов
+        # Запрашиваем метраж бракованной пленки
         keyboard = ReplyKeyboardMarkup(
             keyboard=[[KeyboardButton(text="◀️ Назад")]],
             resize_keyboard=True
         )
         
         await message.answer(
-            f"Введите количество рулонов пленки {film_code} (толщина: {thickness} мм):",
+            f"Введите метраж бракованной пленки цвета {film_color} (толщина: {thickness} мм):",
             reply_markup=keyboard
         )
         
-        await state.set_state(ProductionStates.waiting_for_film_quantity)
+        await state.set_state(ProductionStates.waiting_for_defect_film_meters)
     except ValueError:
         await message.answer("Пожалуйста, введите корректное число (0.5 или 0.8).")
 
