@@ -12,7 +12,7 @@ from sqlalchemy import func
 
 from models import User, UserRole, Film, Panel, Joint, Glue, FinishedProduct, Operation, JointType, Order, OrderStatus, ProductionOrder
 from database import get_db
-from navigation import MenuState, get_menu_keyboard, go_back, get_back_keyboard, get_cancel_keyboard
+from navigation import MenuState, get_menu_keyboard, go_back, get_back_keyboard, get_cancel_keyboard, get_film_thickness_keyboard
 from states import ProductionStates
 from utils import check_production_access, get_role_menu_keyboard
 from handlers.sales import handle_warehouse_order, handle_stock
@@ -97,14 +97,6 @@ def get_joint_thickness_keyboard():
 
 def get_roll_length_keyboard():
 
-def get_film_thickness_keyboard():
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="0.5")],
-            [KeyboardButton(text="0.8")],
-            [KeyboardButton(text="◀️ Назад")]
-        ],
-        resize_keyboard=True
     )
     return ReplyKeyboardMarkup(
         keyboard=[
