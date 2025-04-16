@@ -184,6 +184,51 @@ async def handle_panel_defect(message: Message, state: FSMContext):
     await state.update_data(defect_type="panel_defect")
     await state.set_state(ProductionStates.waiting_for_defect_panel_quantity)
 
+# Специальный обработчик для брака пленки с высоким приоритетом - перемещен выше для приоритета
+@router.message(ProductionStates.waiting_for_defect_type, F.text == "🎨 Пленка")
+async def handle_film_defect(message: Message, state: FSMContext):
+    logging.info("Специальный обработчик для брака пленки вызван")
+    
+    # Проверяем, что мы действительно находимся в состоянии ожидания типа брака
+    current_state = await state.get_state()
+    logging.info(f"Текущее состояние при обработке брака пленки: {current_state}")
+    
+    if current_state != ProductionStates.waiting_for_defect_type:
+        logging.warning(f"Вызов handle_film_defect в неправильном состоянии: {current_state}")
+        return
+    
+    db = next(get_db())
+    try:
+        # Получаем список всех цветов пленки
+        films = db.query(Film).all()
+        films_list = [f"- {film.code} (остаток: {film.total_remaining} м)" for film in films]
+        logging.info(f"Доступные пленки: {films_list}")
+        
+        await state.update_data(defect_type="film")
+        await state.set_state(ProductionStates.waiting_for_defect_film_color)
+        
+        # Запрашиваем цвет пленки
+        keyboard = ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="◀️ Назад")]],
+            resize_keyboard=True
+        )
+        
+        # Если нет пленок в системе, сообщаем что нельзя добавить брак
+        if not films:
+            await message.answer(
+                "В системе нет ни одной пленки. Сначала добавьте пленку через меню 'Приход сырья'.",
+                reply_markup=keyboard
+            )
+            return
+        
+        films_text = "\n".join(films_list)
+        await message.answer(
+            f"Выберите цвет/код бракованной пленки из списка:\n\nДоступные варианты:\n{films_text}",
+            reply_markup=keyboard
+        )
+    finally:
+        db.close()
+
 # Обработка прихода пустых панелей
 @router.message(F.text == "🪵 Панель")
 async def handle_panel(message: Message, state: FSMContext):
@@ -447,11 +492,10 @@ async def process_film_code(message: Message, state: FSMContext):
         # Если пленки с таким кодом нет, создаем новую запись
         if not film:
             # Создаем новую запись пленки с указанным кодом и нулевым остатком
+            # НЕ указываем значения по умолчанию - они будут заданы пользователем
             film = Film(
                 code=film_code,
-                panel_consumption=3.0,  # Расход на одну панель по умолчанию
-                meters_per_roll=50.0,   # Метров в рулоне по умолчанию
-                total_remaining=0.0     # Нулевой остаток для начала
+                total_remaining=0.0     # Только нулевой остаток для начала
             )
             db.add(film)
             db.commit()
@@ -605,8 +649,8 @@ async def process_panel_consumption(message: Message, state: FSMContext):
                 # Если запись о пленке не найдена, создаем ее
                 film = Film(
                     code=film_code,
-                    panel_consumption=panel_consumption,  # Используем введенное значение
-                    meters_per_roll=meters,
+                    panel_consumption=panel_consumption,  # Используем введенное значение расхода
+                    meters_per_roll=meters,               # Используем введенное значение метража в рулоне
                     total_remaining=total_meters
                 )
                 db.add(film)
@@ -614,9 +658,8 @@ async def process_panel_consumption(message: Message, state: FSMContext):
                 # Обновляем метраж пленки
                 film.total_remaining += total_meters
                 
-                # Обновляем метраж в рулоне, если он не был задан или был равен 0
-                if not film.meters_per_roll or film.meters_per_roll == 0:
-                    film.meters_per_roll = meters
+                # Всегда используем введенное значение для метража в рулоне
+                film.meters_per_roll = meters
                 
                 # Обновляем расход на панель, принимая новое значение
                 film.panel_consumption = panel_consumption
