@@ -210,6 +210,94 @@ async def handle_panel_defect(message: Message, state: FSMContext):
     await state.set_state(ProductionStates.waiting_for_defect_panel_quantity)
     logging.info("Состояние изменено на waiting_for_defect_panel_quantity")
 
+# Обработчик для количества бракованных панелей
+@router.message(ProductionStates.waiting_for_defect_panel_quantity)
+async def process_defect_panel_quantity(message: Message, state: FSMContext):
+    logging.info(f"Обработка количества бракованных панелей: '{message.text}'")
+    
+    if message.text == "◀️ Назад":
+        logging.info("Пользователь нажал Назад")
+        await message.answer(
+            "Выберите тип брака:",
+            reply_markup=get_menu_keyboard(MenuState.PRODUCTION_DEFECT)
+        )
+        await state.set_state(ProductionStates.waiting_for_defect_type)
+        return
+
+    try:
+        quantity = int(message.text)
+        if quantity <= 0:
+            await message.answer("Количество должно быть положительным числом.")
+            return
+        
+        # Проверяем, что мы в правильном контексте обработки брака
+        data = await state.get_data()
+        defect_type = data.get("defect_type", "")
+        
+        logging.info(f"Обработка брака панелей, тип: {defect_type}, количество: {quantity}")
+        
+        if defect_type != "panel_defect":
+            logging.warning(f"Неправильный тип операции брака: {defect_type}")
+            await message.answer("Произошла ошибка. Пожалуйста, начните процесс заново.")
+            await state.set_state(MenuState.PRODUCTION_MAIN)
+            return
+            
+        db = next(get_db())
+        try:
+            # Получаем пользователя из базы данных
+            user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
+            
+            # Получаем текущий запас панелей
+            panel = db.query(Panel).first()
+            
+            if not panel or panel.quantity < quantity:
+                await message.answer(
+                    f"Невозможно списать {quantity} панелей, доступно только {panel.quantity if panel else 0}.",
+                    reply_markup=get_menu_keyboard(MenuState.PRODUCTION_MAIN)
+                )
+                return
+                
+            # Запоминаем предыдущее количество
+            previous_quantity = panel.quantity
+            
+            # Уменьшаем количество панелей
+            panel.quantity -= quantity
+            
+            # Создаем запись об операции
+            operation = Operation(
+                user_id=user.id,
+                operation_type="panel_defect_subtract",
+                quantity=quantity,
+                details=json.dumps({
+                    "previous_quantity": previous_quantity,
+                    "new_quantity": panel.quantity,
+                    "is_defect": True  # Указываем, что это операция брака
+                })
+            )
+            
+            # Добавляем операцию в базу данных
+            db.add(operation)
+            
+            # Сохраняем изменения
+            db.commit()
+            
+            logging.info(f"Бракованные панели успешно списаны, было: {previous_quantity}, стало: {panel.quantity}")
+            
+            # Возвращаемся в главное меню
+            await state.set_state(MenuState.PRODUCTION_MAIN)
+            
+            await message.answer(
+                f"✅ Брак панелей зарегистрирован!\n"
+                f"Количество: {quantity} шт.\n"
+                f"Предыдущий остаток: {previous_quantity} шт.\n"
+                f"Текущий остаток: {panel.quantity} шт.",
+                reply_markup=get_menu_keyboard(MenuState.PRODUCTION_MAIN)
+            )
+        finally:
+            db.close()
+    except ValueError:
+        await message.answer("Пожалуйста, введите целое число.")
+
 # Обработка прихода пустых панелей
 @router.message(F.text == "🪵 Панель")
 async def handle_panel(message: Message, state: FSMContext):
