@@ -387,10 +387,6 @@ async def handle_joint_defect(message: Message, state: FSMContext):
     await state.update_data(defect_type="joint")
     await state.set_state(ProductionStates.waiting_for_defect_joint_type)
 
-# Специальный обработчик для брака панелей - УДАЛЯЕМ ЭТОТ ДУБЛИКАТ
-    # Четко указываем, что это панель для дефекта
-    await state.update_data(defect_type="panel_defect")
-    await state.set_state(ProductionStates.waiting_for_defect_panel_quantity)
 
 # Специальный обработчик для брака клея
 @router.message(ProductionStates.waiting_for_defect_type, F.text == "🧴 Клей")
