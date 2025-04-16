@@ -96,6 +96,16 @@ def get_joint_thickness_keyboard():
     )
 
 def get_roll_length_keyboard():
+
+def get_film_thickness_keyboard():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="0.5")],
+            [KeyboardButton(text="0.8")],
+            [KeyboardButton(text="◀️ Назад")]
+        ],
+        resize_keyboard=True
+    )
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="200")],
