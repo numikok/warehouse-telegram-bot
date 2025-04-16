@@ -97,7 +97,6 @@ def get_joint_thickness_keyboard():
 
 def get_roll_length_keyboard():
 
-    )
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="200")],
