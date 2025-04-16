@@ -293,43 +293,6 @@ async def process_panel_quantity(message: Message, state: FSMContext):
     except ValueError:
         await message.answer("Пожалуйста, введите целое число.")
 
-# Специальный обработчик для кнопок брака с высоким приоритетом
-@router.message(ProductionStates.waiting_for_defect_type, F.text == "🎨 Пленка")
-async def handle_film_defect(message: Message, state: FSMContext):
-    logging.info("Специальный обработчик для брака пленки вызван")
-    
-    db = next(get_db())
-    try:
-        # Получаем список всех цветов пленки
-        films = db.query(Film).all()
-        films_list = [f"- {film.code} (остаток: {film.total_remaining} м)" for film in films]
-        logging.info(f"Доступные пленки: {films_list}")
-        
-        await state.update_data(defect_type="film")
-        await state.set_state(ProductionStates.waiting_for_defect_film_color)
-        
-        # Запрашиваем цвет пленки
-        keyboard = ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="◀️ Назад")]],
-            resize_keyboard=True
-        )
-        
-        # Если нет пленок в системе, просто предлагаем ввести новый цвет
-        if not films:
-            await message.answer(
-                "В системе нет ни одной пленки. Пожалуйста, введите цвет/код пленки для учета брака:",
-                reply_markup=keyboard
-            )
-        else:
-            films_text = "\n".join(films_list)
-            await message.answer(
-                f"Пожалуйста, укажите цвет/код бракованной пленки.\n\nДоступные варианты:\n{films_text}\n\n"
-                "Вы также можете ввести новый цвет пленки, если его нет в списке.",
-                reply_markup=keyboard
-            )
-    finally:
-        db.close()
-
 # Специальный обработчик для брака стыков
 @router.message(ProductionStates.waiting_for_defect_type, F.text == "⚙️ Стык")
 async def handle_joint_defect(message: Message, state: FSMContext):
@@ -420,36 +383,45 @@ async def handle_film(message: Message, state: FSMContext):
     if not await check_production_access(message):
         return
     
-    logging.info(f"Нажата кнопка 'Пленка', текущее состояние: {await state.get_state()}")
+    # Проверяем, что мы находимся в состоянии добавления материалов
+    current_state = await state.get_state()
+    logging.info(f"Нажата кнопка 'Пленка', текущее состояние: {current_state}")
+    
+    # Если мы в меню выбора типа брака, пропускаем эту обработку
+    if current_state == ProductionStates.waiting_for_defect_type:
+        logging.info("Пропускаем обработку в handle_film, так как находимся в меню брака. Будет вызван handle_film_defect.")
+        return
+    
+    # Если мы не в меню материалов, пропускаем обработку
+    if current_state != MenuState.PRODUCTION_MATERIALS:
+        logging.info(f"Пропускаем обработку, так как не в режиме добавления материалов")
+        return
+        
+    # Запрашиваем код пленки
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="◀️ Назад")]],
+        resize_keyboard=True
+    )
+    
+    # Получаем список существующих пленок
     db = next(get_db())
     try:
         # Получаем список доступных пленок
         films = db.query(Film).all()
         
-        if not films:
-            keyboard = await get_role_menu_keyboard(MenuState.PRODUCTION_MATERIALS, message, state)
-            await message.answer(
-                "В системе нет ни одной пленки.",
-                reply_markup=keyboard
-            )
-            return
-        
-        # Формируем список пленок
-        film_info = []
-        for film in films:
-            panel_count = film.calculate_possible_panels()
-            film_info.append(
-                f"- {film.code}: {film.total_remaining:.2f}м (хватит на ~{panel_count} панелей)"
-            )
-        
-        # Запрашиваем код пленки
-        keyboard = ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="◀️ Назад")]],
-            resize_keyboard=True
-        )
+        # Формируем список пленок, если они есть
+        film_info_text = ""
+        if films:
+            film_info = []
+            for film in films:
+                panel_count = film.calculate_possible_panels()
+                film_info.append(
+                    f"- {film.code}: {film.total_remaining:.2f}м (хватит на ~{panel_count} панелей)"
+                )
+            film_info_text = "\n\nИмеющиеся пленки:\n" + "\n".join(film_info)
         
         await message.answer(
-            "Введите код пленки:\n\n" + "\n".join(film_info),
+            f"Введите код пленки, которую хотите добавить:{film_info_text}",
             reply_markup=keyboard
         )
         
@@ -1679,22 +1651,19 @@ async def process_defect_film_color(message: Message, state: FSMContext):
         # Проверяем существование пленки
         film = db.query(Film).filter(Film.code == film_color).first()
         
-        # Если пленки с таким кодом еще нет, создаем новую запись
+        # Если пленки с таким кодом нет, сообщаем об ошибке
         if not film:
-            logging.info(f"Создание новой записи для пленки цвета '{film_color}'")
-            film = Film(
-                code=film_color,
-                panel_consumption=3.0,  # Расход на одну панель по умолчанию
-                meters_per_roll=50.0,   # Метров в рулоне по умолчанию
-                total_remaining=0.0     # Нулевой остаток для начала
-            )
-            db.add(film)
-            db.commit()
-            
-            # Уведомляем, что добавлен новый цвет
+            logging.warning(f"Пленка с цветом '{film_color}' не найдена в базе")
             await message.answer(
-                f"👍 Добавлен новый цвет пленки: {film_color}"
+                f"Пленка с цветом '{film_color}' не найдена в базе данных. "
+                f"Пожалуйста, выберите из списка доступных цветов или сначала добавьте "
+                f"этот цвет пленки через меню 'Приход сырья'.",
+                reply_markup=ReplyKeyboardMarkup(
+                    keyboard=[[KeyboardButton(text="◀️ Назад")]],
+                    resize_keyboard=True
+                )
             )
+            return
         
         logging.info(f"Найдена пленка: {film.code}, остаток: {film.total_remaining} м")
         
@@ -1708,7 +1677,8 @@ async def process_defect_film_color(message: Message, state: FSMContext):
         )
         
         await message.answer(
-            f"Введите количество метров бракованной пленки цвета {film_color}:",
+            f"Введите количество метров бракованной пленки цвета {film_color}:\n\n"
+            f"Доступно: {film.total_remaining:.1f} м",
             reply_markup=keyboard
         )
         
