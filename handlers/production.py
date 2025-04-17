@@ -1781,6 +1781,102 @@ async def process_defect_film_thickness(message: Message, state: FSMContext):
     except ValueError:
         await message.answer("Пожалуйста, введите корректное число (0.5 или 0.8).")
 
+@router.message(ProductionStates.waiting_for_defect_film_meters)
+async def process_defect_film_meters(message: Message, state: FSMContext):
+    logging.info(f"Обработка метража бракованной пленки: '{message.text}'")
+    
+    if message.text == "◀️ Назад":
+        logging.info("Пользователь нажал Назад")
+        # Получаем сохраненные данные
+        data = await state.get_data()
+        film_color = data.get('defect_film_color', '')
+        
+        # Возвращаемся к выбору толщины
+        await message.answer(
+            f"Выберите толщину бракованной пленки цвета {film_color}:",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="0.5")], [KeyboardButton(text="0.8")], [KeyboardButton(text="◀️ Назад")]],
+                resize_keyboard=True
+            )
+        )
+        await state.set_state(ProductionStates.waiting_for_defect_film_thickness)
+        return
+    
+    try:
+        meters = float(message.text.strip())
+        if meters <= 0:
+            await message.answer("Метраж должен быть положительным числом.")
+            return
+        
+        # Получаем данные состояния
+        data = await state.get_data()
+        film_color = data.get('defect_film_color', '')
+        film_thickness = data.get('defect_film_thickness', 0.5)
+        
+        db = next(get_db())
+        try:
+            # Получаем пленку из базы данных
+            film = db.query(Film).filter(Film.code == film_color).first()
+            if not film:
+                logging.warning(f"Пленка с цветом '{film_color}' не найдена в базе")
+                await message.answer("Пленка с таким цветом не найдена в базе данных.")
+                return
+            
+            # Проверяем достаточность пленки
+            if film.total_remaining < meters:
+                logging.warning(f"Недостаточно пленки: запрошено {meters}м, доступно {film.total_remaining}м")
+                await message.answer(
+                    f"Невозможно списать {meters}м пленки, доступно только {film.total_remaining}м."
+                )
+                return
+            
+            # Получаем пользователя из базы данных
+            user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
+            
+            # Уменьшаем метраж пленки
+            previous_remaining = film.total_remaining
+            film.total_remaining -= meters
+            logging.info(f"Списываем {meters}м пленки. Было: {previous_remaining}м, стало: {film.total_remaining}м")
+            
+            # Создаем запись операции
+            operation = Operation(
+                user_id=user.id,
+                operation_type="film_defect",
+                quantity=meters,
+                details=json.dumps({
+                    "film_color": film_color,
+                    "film_thickness": film_thickness,
+                    "previous_remaining": previous_remaining,
+                    "new_remaining": film.total_remaining,
+                    "is_defect": True
+                })
+            )
+            logging.info(f"Создаю запись операции: {operation.operation_type}, количество: {operation.quantity}")
+            
+            db.add(operation)
+            db.commit()
+            logging.info("Операция успешно записана в БД")
+            
+            await message.answer(
+                f"✅ Списано {meters}м бракованной пленки\n"
+                f"Цвет: {film_color}\n"
+                f"Толщина: {film_thickness} мм\n"
+                f"Остаток: {film.total_remaining}м",
+                reply_markup=get_menu_keyboard(MenuState.PRODUCTION_MAIN)
+            )
+            logging.info("Отправлено сообщение об успешном списании")
+            
+        finally:
+            db.close()
+            
+    except ValueError:
+        logging.warning(f"Введено некорректное значение: '{message.text}'")
+        await message.answer("Пожалуйста, введите корректное число.")
+        return
+    
+    logging.info("Сбрасываю состояние")
+    await state.clear()
+
 @router.message(ProductionStates.waiting_for_film_quantity)
 async def process_film_quantity(message: Message, state: FSMContext):
     if message.text == "◀️ Назад":
