@@ -106,7 +106,7 @@ async def handle_materials_income(message: Message, state: FSMContext):
     )
 
 # Специальный обработчик для брака панелей - перемещен выше для приоритета
-@router.message(ProductionStates.waiting_for_defect_type, lambda message: message.text and "🪵 Панель" in message.text)
+@router.message(ProductionStates.waiting_for_defect_type, F.text == "🪵 Панель")
 async def handle_panel_defect(message: Message, state: FSMContext):
     logging.info("Специальный обработчик для брака панелей вызван")
     
@@ -130,6 +130,8 @@ async def handle_panel_defect(message: Message, state: FSMContext):
             )
             return
         
+        logging.info(f"Найдены панели, текущий остаток: {panel.quantity} шт.")
+        
         await message.answer(
             f"Введите количество бракованных панелей:\n\nДоступно: {panel.quantity} шт.",
             reply_markup=ReplyKeyboardMarkup(
@@ -137,15 +139,20 @@ async def handle_panel_defect(message: Message, state: FSMContext):
                 resize_keyboard=True
             )
         )
+        
+        logging.info("Запрошено количество бракованных панелей")
     finally:
         db.close()
     
     # Четко указываем, что это панель для дефекта
     await state.update_data(defect_type="panel_defect")
+    logging.info("Установлен тип дефекта: panel_defect")
+    
     await state.set_state(ProductionStates.waiting_for_defect_panel_quantity)
+    logging.info("Установлено состояние: waiting_for_defect_panel_quantity")
 
 # Специальный обработчик для брака пленки с высоким приоритетом - перемещен выше для приоритета
-@router.message(ProductionStates.waiting_for_defect_type, lambda message: message.text and "🎨 Пленка" in message.text)
+@router.message(ProductionStates.waiting_for_defect_type, F.text == "🎨 Пленка")
 async def handle_film_defect(message: Message, state: FSMContext):
     logging.info("Специальный обработчик для брака пленки вызван")
     
@@ -299,7 +306,7 @@ async def process_panel_quantity(message: Message, state: FSMContext):
         await message.answer("Пожалуйста, введите целое число.")
 
 # Специальный обработчик для брака стыков
-@router.message(ProductionStates.waiting_for_defect_type, lambda message: message.text and "⚙️ Стык" in message.text)
+@router.message(ProductionStates.waiting_for_defect_type, F.text == "⚙️ Стык")
 async def handle_joint_defect(message: Message, state: FSMContext):
     logging.info("Специальный обработчик для брака стыков вызван")
     
@@ -349,7 +356,7 @@ async def handle_joint_defect(message: Message, state: FSMContext):
 
 
 # Специальный обработчик для брака клея
-@router.message(ProductionStates.waiting_for_defect_type, lambda message: message.text and "🧴 Клей" in message.text)
+@router.message(ProductionStates.waiting_for_defect_type, F.text == "🧴 Клей")
 async def handle_glue_defect(message: Message, state: FSMContext):
     logging.info("Специальный обработчик для брака клея вызван")
     
@@ -358,7 +365,6 @@ async def handle_glue_defect(message: Message, state: FSMContext):
         # Получаем текущий остаток клея
         glue = db.query(Glue).first()
         if not glue or glue.quantity <= 0:
-            logging.warning("В базе нет клея")
             await message.answer(
                 "В базе нет клея.",
                 reply_markup=get_menu_keyboard(MenuState.PRODUCTION_MAIN)
