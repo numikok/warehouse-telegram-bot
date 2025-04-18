@@ -105,7 +105,7 @@ async def handle_materials_income(message: Message, state: FSMContext):
         reply_markup=get_menu_keyboard(MenuState.PRODUCTION_MATERIALS)
     )
 
-# Специальный обработчик для брака панелей - перемещен выше для приоритета
+# Специальный обработчик для брака панелей
 @router.message(ProductionStates.waiting_for_defect_type, F.text == "🪵 Панель")
 async def handle_panel_defect(message: Message, state: FSMContext):
     logging.info("Специальный обработчик для брака панелей вызван")
@@ -114,7 +114,7 @@ async def handle_panel_defect(message: Message, state: FSMContext):
     current_state = await state.get_state()
     logging.info(f"Текущее состояние: {current_state}")
     
-    if current_state != ProductionStates.waiting_for_defect_type:
+    if current_state != "production_states:waiting_for_defect_type":
         logging.warning(f"Вызов handle_panel_defect в неправильном состоянии: {current_state}")
         return
     
@@ -1178,3 +1178,63 @@ async def handle_film_defect(message: Message, state: FSMContext):
         )
     finally:
         db.close()
+
+# Обработка брака
+@router.message(F.text == "🚫 Брак")
+async def handle_defect(message: Message, state: FSMContext):
+    logging.info("Нажата кнопка 'Брак'")
+    
+    if not await check_production_access(message):
+        logging.warning("Отказано в доступе к функциональности брака")
+        return
+    
+    # Сбрасываем любые предыдущие данные в состоянии, которые могли остаться
+    await state.clear()
+    
+    logging.info("Устанавливаю состояние ожидания типа брака")
+    # Устанавливаем состояние ожидания выбора типа брака
+    await state.set_state(ProductionStates.waiting_for_defect_type)
+    
+    # Формируем клавиатуру для выбора типа брака
+    keyboard = get_menu_keyboard(MenuState.PRODUCTION_DEFECT)
+    logging.info(f"Сформирована клавиатура: {keyboard}")
+    
+    await message.answer(
+        "Выберите тип брака:",
+        reply_markup=keyboard
+    )
+
+# Обработчик для панелей в меню материалов
+@router.message(F.text == "🪵 Панель")
+async def handle_panel(message: Message, state: FSMContext):
+    logging.info("Нажата кнопка 'Панель'")
+    
+    # Получаем текущее состояние
+    current_state = await state.get_state()
+    logging.info(f"Текущее состояние при нажатии кнопки 'Панель': {current_state}")
+    
+    # Проверяем, что мы находимся в режиме добавления материалов
+    if current_state != MenuState.PRODUCTION_MATERIALS:
+        logging.info("Пропускаем обработку обычной панели, так как находимся не в меню материалов")
+        return
+    
+    # Устанавливаем тип операции (приход панелей)
+    await state.update_data(operation_type="panel_income")
+    
+    # Запрашиваем толщину панелей
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="0.5")],
+            [KeyboardButton(text="0.8")],
+            [KeyboardButton(text="◀️ Назад")]
+        ],
+        resize_keyboard=True
+    )
+    
+    await message.answer(
+        "Выберите толщину панелей (мм):",
+        reply_markup=keyboard
+    )
+    
+    await state.set_state(ProductionStates.waiting_for_panel_thickness)
+    logging.info(f"Установлено состояние waiting_for_panel_thickness")
