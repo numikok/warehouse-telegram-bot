@@ -63,6 +63,7 @@ class Panel(Base):
     
     id = Column(Integer, primary_key=True)
     quantity = Column(Integer, default=0)  # Количество панелей (каждая по 3 метра)
+    thickness = Column(Float, nullable=False, default=0.5)  # Толщина панели (0.5 или 0.8)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -134,6 +135,7 @@ class Order(Base):
     manager_id = Column(Integer, ForeignKey('users.id'), nullable=False)
     film_code = Column(String, nullable=False)  # Код пленки
     panel_quantity = Column(Integer, nullable=False)  # Количество панелей
+    panel_thickness = Column(Float, nullable=False, default=0.5)  # Толщина панели (0.5 или 0.8)
     joint_type = Column(SQLEnum(JointType), nullable=False)  # Тип стыка
     joint_color = Column(String, nullable=False)  # Цвет стыка
     joint_quantity = Column(Integer, nullable=False)  # Количество стыков
@@ -152,6 +154,7 @@ class Order(Base):
         return {
             "id": self.id,
             "film_code": self.film_code,
+            "panel_thickness": self.panel_thickness,
             "panel_quantity": self.panel_quantity,
             "joint_type": self.joint_type.value,
             "joint_color": self.joint_color,
@@ -173,6 +176,7 @@ class CompletedOrder(Base):
     manager_id = Column(Integer, ForeignKey('users.id'), nullable=False)
     warehouse_user_id = Column(Integer, ForeignKey('users.id'), nullable=False)  # ID складовщика, выполнившего заказ
     film_code = Column(String, nullable=False)
+    panel_thickness = Column(Float, nullable=False, default=0.5)  # Толщина панели (0.5 или 0.8)
     panel_quantity = Column(Integer, nullable=False)
     joint_type = Column(SQLEnum(JointType), nullable=False)
     joint_color = Column(String, nullable=False)
@@ -191,6 +195,7 @@ class CompletedOrder(Base):
             "id": self.id,
             "order_id": self.order_id,
             "film_code": self.film_code,
+            "panel_thickness": self.panel_thickness,
             "panel_quantity": self.panel_quantity,
             "joint_type": self.joint_type.value,
             "joint_color": self.joint_color,

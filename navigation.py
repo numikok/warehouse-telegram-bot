@@ -2,6 +2,7 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemo
 from models import UserRole
 from enum import Enum, auto
 from aiogram.fsm.context import FSMContext
+from aiogram.types import Message
 
 class MenuState(str, Enum):
     # Главное меню для каждой роли
@@ -294,4 +295,31 @@ def get_cancel_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="❌ Отмена")]],
         resize_keyboard=True
-    ) 
+    )
+
+def get_joint_thickness_keyboard():
+    # Создаем клавиатуру с толщинами стыков
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="0.5")],
+            [KeyboardButton(text="0.8")],
+            [KeyboardButton(text="◀️ Назад")]
+        ],
+        resize_keyboard=True
+    )
+    return keyboard
+
+def get_film_thickness_keyboard():
+    # Создаем клавиатуру с толщинами пленки
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="0.5")],
+            [KeyboardButton(text="0.8")],
+            [KeyboardButton(text="◀️ Назад")]
+        ],
+        resize_keyboard=True
+    )
+    return keyboard
+
+async def get_role_menu_keyboard(menu_state: MenuState, message: Message, state: FSMContext) -> ReplyKeyboardMarkup:
+    # ... existing code ... 
