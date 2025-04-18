@@ -116,6 +116,348 @@ async def handle_create_order(message: Message, state: FSMContext):
     finally:
         db.close()
 
+@router.message(SalesStates.product_thickness)
+async def process_product_thickness(message: Message, state: FSMContext):
+    """Обработка выбора толщины панелей"""
+    thickness_text = message.text.strip()
+    
+    if thickness_text == "◀️ Назад":
+        # Возвращаемся в главное меню
+        state_data = await state.get_data()
+        is_admin_context = state_data.get("is_admin_context", False)
+        
+        await state.set_state(MenuState.SALES_MAIN)
+        await message.answer(
+            "Выберите действие:",
+            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
+        )
+        return
+    
+    try:
+        thickness = float(thickness_text)
+        
+        # Сохраняем выбранную толщину
+        await state.update_data(current_thickness=thickness)
+        
+        db = next(get_db())
+        try:
+            # Получаем список готовой продукции для выбранной толщины
+            finished_products = db.query(FinishedProduct).join(Film).filter(
+                FinishedProduct.thickness == thickness,
+                FinishedProduct.quantity > 0
+            ).all()
+            
+            if not finished_products:
+                await message.answer(
+                    f"Для толщины {thickness} мм нет доступной продукции на складе.",
+                    reply_markup=ReplyKeyboardMarkup(
+                        keyboard=[[KeyboardButton(text="◀️ Назад")]],
+                        resize_keyboard=True
+                    )
+                )
+                return
+            
+            # Формируем клавиатуру с доступными цветами пленки для этой толщины
+            keyboard_rows = []
+            for product in finished_products:
+                keyboard_rows.append([KeyboardButton(
+                    text=f"{product.film.code} (остаток: {product.quantity} шт.)"
+                )])
+            
+            keyboard_rows.append([KeyboardButton(text="◀️ Назад")])
+            keyboard = ReplyKeyboardMarkup(keyboard=keyboard_rows, resize_keyboard=True)
+            
+            # Отображаем доступные цвета
+            products_info = "\n".join([
+                f"- {product.film.code}: {product.quantity} шт."
+                for product in finished_products
+            ])
+            
+            await message.answer(
+                f"Выберите цвет пленки (толщина {thickness} мм):\n\n{products_info}",
+                reply_markup=keyboard
+            )
+            
+            # Переходим к выбору цвета
+            await state.set_state(SalesStates.selecting_products)
+            
+        finally:
+            db.close()
+    except ValueError:
+        await message.answer(
+            "Пожалуйста, выберите корректную толщину панелей из предложенных вариантов.",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="◀️ Назад")]],
+                resize_keyboard=True
+            )
+        )
+
+@router.message(SalesStates.selecting_products)
+async def process_selecting_products(message: Message, state: FSMContext):
+    """Обработка выбора цвета пленки для продукта"""
+    film_text = message.text.strip()
+    
+    if film_text == "◀️ Назад":
+        # Возвращаемся к выбору толщины
+        await handle_create_order(message, state)
+        return
+    
+    # Извлекаем код пленки из текста вида "Код (остаток: X шт.)"
+    if "(" in film_text:
+        film_code = film_text.split("(")[0].strip()
+    else:
+        film_code = film_text
+    
+    # Сохраняем выбранный код пленки
+    await state.update_data(current_film_code=film_code)
+    
+    # Получаем выбранную толщину
+    data = await state.get_data()
+    thickness = data.get('current_thickness')
+    
+    # Проверяем наличие продукта
+    db = next(get_db())
+    try:
+        product = db.query(FinishedProduct).join(Film).filter(
+            Film.code == film_code,
+            FinishedProduct.thickness == thickness,
+            FinishedProduct.quantity > 0
+        ).first()
+        
+        if not product:
+            await message.answer(
+                f"Продукт с кодом {film_code} и толщиной {thickness} мм не найден или закончился на складе.",
+                reply_markup=ReplyKeyboardMarkup(
+                    keyboard=[[KeyboardButton(text="◀️ Назад")]],
+                    resize_keyboard=True
+                )
+            )
+            return
+        
+        # Запрашиваем количество
+        await message.answer(
+            f"Введите количество панелей (доступно: {product.quantity} шт.):",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="◀️ Назад")]],
+                resize_keyboard=True
+            )
+        )
+        
+        # Переходим к вводу количества
+        await state.set_state(SalesStates.product_quantity)
+        
+    finally:
+        db.close()
+
+@router.message(SalesStates.product_quantity)
+async def process_product_quantity(message: Message, state: FSMContext):
+    """Обработка ввода количества панелей"""
+    quantity_text = message.text.strip()
+    
+    if quantity_text == "◀️ Назад":
+        # Возвращаемся к выбору цвета
+        data = await state.get_data()
+        thickness = data.get('current_thickness')
+        
+        # Показываем снова список продуктов для выбранной толщины
+        db = next(get_db())
+        try:
+            finished_products = db.query(FinishedProduct).join(Film).filter(
+                FinishedProduct.thickness == thickness,
+                FinishedProduct.quantity > 0
+            ).all()
+            
+            keyboard_rows = []
+            for product in finished_products:
+                keyboard_rows.append([KeyboardButton(
+                    text=f"{product.film.code} (остаток: {product.quantity} шт.)"
+                )])
+            
+            keyboard_rows.append([KeyboardButton(text="◀️ Назад")])
+            keyboard = ReplyKeyboardMarkup(keyboard=keyboard_rows, resize_keyboard=True)
+            
+            products_info = "\n".join([
+                f"- {product.film.code}: {product.quantity} шт."
+                for product in finished_products
+            ])
+            
+            await message.answer(
+                f"Выберите цвет пленки (толщина {thickness} мм):\n\n{products_info}",
+                reply_markup=keyboard
+            )
+            
+            await state.set_state(SalesStates.selecting_products)
+        finally:
+            db.close()
+        return
+    
+    try:
+        quantity = int(quantity_text)
+        if quantity <= 0:
+            await message.answer(
+                "Количество должно быть положительным числом.",
+                reply_markup=ReplyKeyboardMarkup(
+                    keyboard=[[KeyboardButton(text="◀️ Назад")]],
+                    resize_keyboard=True
+                )
+            )
+            return
+        
+        # Получаем данные о выбранном продукте
+        data = await state.get_data()
+        film_code = data.get('current_film_code')
+        thickness = data.get('current_thickness')
+        
+        # Проверяем наличие достаточного количества продукта
+        db = next(get_db())
+        try:
+            product = db.query(FinishedProduct).join(Film).filter(
+                Film.code == film_code,
+                FinishedProduct.thickness == thickness
+            ).first()
+            
+            if not product or product.quantity < quantity:
+                available = product.quantity if product else 0
+                await message.answer(
+                    f"Недостаточное количество продукта (запрошено: {quantity} шт., доступно: {available} шт.)",
+                    reply_markup=ReplyKeyboardMarkup(
+                        keyboard=[[KeyboardButton(text="◀️ Назад")]],
+                        resize_keyboard=True
+                    )
+                )
+                return
+            
+            # Добавляем продукт в корзину
+            selected_products = data.get('selected_products', [])
+            product_key = f"{film_code}|{thickness}"
+            
+            # Проверяем, есть ли уже такой продукт в корзине
+            for i, product_data in enumerate(selected_products):
+                if product_data.get('key') == product_key:
+                    # Обновляем количество
+                    selected_products[i]['quantity'] = quantity
+                    break
+            else:
+                # Добавляем новый продукт
+                selected_products.append({
+                    'key': product_key,
+                    'film_code': film_code,
+                    'thickness': thickness,
+                    'quantity': quantity
+                })
+            
+            # Обновляем данные в состоянии
+            await state.update_data(selected_products=selected_products)
+            
+            # Спрашиваем, хочет ли пользователь добавить еще продукты
+            await message.answer(
+                f"✅ Добавлено в заказ: панели с пленкой {film_code}, толщина {thickness} мм - {quantity} шт.\n\n"
+                f"Хотите добавить еще продукцию в заказ?",
+                reply_markup=ReplyKeyboardMarkup(
+                    keyboard=[
+                        [KeyboardButton(text="✅ Да"), KeyboardButton(text="❌ Нет")],
+                        [KeyboardButton(text="◀️ Назад")]
+                    ],
+                    resize_keyboard=True
+                )
+            )
+            
+            # Переходим к состоянию выбора добавления еще продуктов
+            await state.set_state(SalesStates.add_more_products)
+            
+        finally:
+            db.close()
+    except ValueError:
+        await message.answer(
+            "Пожалуйста, введите корректное число.",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="◀️ Назад")]],
+                resize_keyboard=True
+            )
+        )
+
+@router.message(SalesStates.add_more_products)
+async def process_add_more_products(message: Message, state: FSMContext):
+    """Обработка выбора добавления еще продуктов"""
+    response = message.text.strip()
+    
+    if response == "✅ Да":
+        # Пользователь хочет добавить еще продукты
+        # Возвращаемся к выбору толщины
+        await handle_create_order(message, state)
+        return
+    elif response == "❌ Нет":
+        # Пользователь закончил добавлять продукты
+        # Переходим к следующему шагу (стыки)
+        data = await state.get_data()
+        selected_products = data.get('selected_products', [])
+        
+        if not selected_products:
+            # Если нет выбранных продуктов, возвращаемся к выбору продуктов
+            await message.answer(
+                "Вы не добавили ни одного продукта в заказ. Пожалуйста, выберите продукцию."
+            )
+            await handle_create_order(message, state)
+            return
+        
+        # Формируем сообщение с выбранными продуктами
+        products_info = "Выбранные продукты:\n"
+        for product in selected_products:
+            products_info += f"▪️ {product['film_code']} (толщина {product['thickness']} мм): {product['quantity']} шт.\n"
+        
+        # Спрашиваем о необходимости стыков
+        await message.answer(
+            f"{products_info}\n\nТребуются ли стыки?",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[
+                    [KeyboardButton(text="✅ Да"), KeyboardButton(text="❌ Нет")],
+                    [KeyboardButton(text="◀️ Назад")]
+                ],
+                resize_keyboard=True
+            )
+        )
+        
+        # Переходим к выбору стыков
+        await state.set_state(SalesStates.waiting_for_need_joints)
+        
+    elif response == "◀️ Назад":
+        # Возвращаемся к вводу количества
+        data = await state.get_data()
+        film_code = data.get('current_film_code')
+        thickness = data.get('current_thickness')
+        
+        db = next(get_db())
+        try:
+            product = db.query(FinishedProduct).join(Film).filter(
+                Film.code == film_code,
+                FinishedProduct.thickness == thickness
+            ).first()
+            
+            available = product.quantity if product else 0
+            
+            await message.answer(
+                f"Введите количество панелей (доступно: {available} шт.):",
+                reply_markup=ReplyKeyboardMarkup(
+                    keyboard=[[KeyboardButton(text="◀️ Назад")]],
+                    resize_keyboard=True
+                )
+            )
+            
+            await state.set_state(SalesStates.product_quantity)
+        finally:
+            db.close()
+    else:
+        await message.answer(
+            "Пожалуйста, выберите один из вариантов: ✅ Да, ❌ Нет или ◀️ Назад",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[
+                    [KeyboardButton(text="✅ Да"), KeyboardButton(text="❌ Нет")],
+                    [KeyboardButton(text="◀️ Назад")]
+                ],
+                resize_keyboard=True
+            )
+        )
+
 @router.message(F.text == "📝 Заказать производство")
 async def handle_production_order(message: Message, state: FSMContext):
     if not await check_sales_access(message):
