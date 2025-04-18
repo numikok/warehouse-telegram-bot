@@ -909,8 +909,11 @@ async def process_joint_quantity(message: Message, state: FSMContext):
         quantity = int(message.text.strip())
         if quantity <= 0:
             await message.answer(
-                "❌ Количество должно быть больше 0",
-                reply_markup=get_menu_keyboard(MenuState.SALES_CREATE_ORDER)
+                "❌ Количество должно быть положительным числом.",
+                reply_markup=ReplyKeyboardMarkup(
+                    keyboard=[[KeyboardButton(text="◀️ Назад")]],
+                    resize_keyboard=True
+                )
             )
             return
         
@@ -931,8 +934,11 @@ async def process_joint_quantity(message: Message, state: FSMContext):
             if not joint or joint.quantity < quantity:
                 available = joint.quantity if joint else 0
                 await message.answer(
-                    f"❌ Недостаточное количество стыков (доступно: {available} шт.)",
-                    reply_markup=get_menu_keyboard(MenuState.SALES_CREATE_ORDER)
+                    f"❌ Недостаточное количество стыков (запрошено: {quantity} шт., доступно: {available} шт.)",
+                    reply_markup=ReplyKeyboardMarkup(
+                        keyboard=[[KeyboardButton(text="◀️ Назад")]],
+                        resize_keyboard=True
+                    )
                 )
                 return
             
@@ -948,9 +954,17 @@ async def process_joint_quantity(message: Message, state: FSMContext):
             # Сохраняем выбранные стыки
             await state.update_data(selected_joints=selected_joints, joint_quantity=quantity)
             
-            # Спрашиваем, нужны ли еще стыки
+            # Спрашиваем, хочет ли пользователь добавить еще стыки
+            joint_type_text = ""
+            if joint_type == JointType.BUTTERFLY:
+                joint_type_text = "Бабочка"
+            elif joint_type == JointType.SIMPLE:
+                joint_type_text = "Простые"
+            elif joint_type == JointType.CLOSING:
+                joint_type_text = "Замыкающие"
+            
             await message.answer(
-                f"✅ Добавлено в заказ: стык типа {joint_type.value}, толщиной {joint_thickness} мм, цвет {joint_color} - {quantity} шт.\n\nХотите добавить еще стыки?",
+                f"✅ Добавлено в заказ: стык {joint_type_text}, толщина {joint_thickness} мм, цвет {joint_color} - {quantity} шт.\n\nХотите добавить еще стыки?",
                 reply_markup=ReplyKeyboardMarkup(
                     keyboard=[
                         [KeyboardButton(text="✅ Да"), KeyboardButton(text="❌ Нет")],
@@ -959,13 +973,19 @@ async def process_joint_quantity(message: Message, state: FSMContext):
                     resize_keyboard=True
                 )
             )
+            
+            # Переходим к состоянию выбора добавления еще стыков
             await state.set_state(SalesStates.waiting_for_add_more_joints)
+            
         finally:
             db.close()
     except ValueError:
         await message.answer(
-            "❌ Пожалуйста, введите число",
-            reply_markup=get_menu_keyboard(MenuState.SALES_CREATE_ORDER)
+            "❌ Пожалуйста, введите корректное число.",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="◀️ Назад")]],
+                resize_keyboard=True
+            )
         )
 
 @router.message(SalesStates.waiting_for_add_more_joints)
@@ -1061,7 +1081,7 @@ async def process_add_more_joints(message: Message, state: FSMContext):
             "Требуется ли клей?",
             reply_markup=keyboard
         )
-        await state.set_state(SalesStates.waiting_for_order_installation)
+        await state.set_state(SalesStates.waiting_for_need_glue)
     elif response == "◀️ Назад":
         # Возвращаемся к вводу количества стыков
         data = await state.get_data()
@@ -1388,11 +1408,11 @@ async def process_order_delivery_address(message: Message, state: FSMContext):
             joint_type = joint.get('joint_type', '')
             joint_type_text = ''
             if joint_type == 'butterfly':
-                joint_type_text = 'Бабочка'
+                joint_type_text = "Бабочка"
             elif joint_type == 'simple':
-                joint_type_text = 'Простой'
+                joint_type_text = "Простые"
             elif joint_type == 'closing':
-                joint_type_text = 'Замыкающий'
+                joint_type_text = "Замыкающие"
             
             order_summary += f"▪️ {joint_type_text}, {joint.get('thickness', '')} мм, {joint.get('color', '')}: {joint.get('quantity', 0)} шт.\n"
         order_summary += "\n"
@@ -1425,15 +1445,17 @@ async def process_order_confirmation(message: Message, state: FSMContext):
         data = await state.get_data()
         
         # Получаем выбранные продукты из состояния
-        selected_products = data.get("selected_products", {})
+        selected_products = data.get("selected_products", [])
         
         # Получаем выбранные стыки из состояния
         selected_joints = data.get("selected_joints", {})
         
         need_joints = len(selected_joints) > 0
         need_glue = data.get("need_glue", False)
-        customer_name = data.get("customer_name")
-        delivery_address = data.get("delivery_address")
+        customer_phone = data.get("customer_phone", "")
+        delivery_address = data.get("delivery_address", "")
+        installation_required = data.get("installation_required", False)
+        glue_quantity = data.get("glue_quantity", 0)
         
         # Определяем тип заказа (готовая продукция или производство)
         db = next(get_db())
@@ -1441,25 +1463,37 @@ async def process_order_confirmation(message: Message, state: FSMContext):
         try:
             # Создаем заказ
             order = Order(
-                customer_name=customer_name,
+                manager_id=message.from_user.id,
+                customer_phone=customer_phone,
                 delivery_address=delivery_address,
+                panel_quantity=0,  # Будет обновлено ниже
+                joint_quantity=0,  # Будет обновлено ниже
+                glue_quantity=glue_quantity,
+                panel_thickness=0.5,  # Значение по умолчанию, будет обновлено если есть продукты
+                installation_required=installation_required,
                 status=OrderStatus.CREATED
             )
             db.add(order)
             db.flush()
             
             # Добавляем продукты в заказ
-            for code_thickness, qty in selected_products.items():
-                code, thickness = code_thickness.split('|')
-                thickness = float(thickness)
+            total_panels = 0
+            for product in selected_products:
+                film_code = product['film_code']
+                thickness = float(product['thickness'])
+                qty = product['quantity']
+                total_panels += qty
                 
-                film = db.query(Film).filter(Film.code == code).first()
+                # Если есть хотя бы один продукт, установим толщину панели в заказе
+                order.panel_thickness = thickness
+                
+                film = db.query(Film).filter(Film.code == film_code).first()
                 if not film:
                     continue
                 
                 # Проверяем, есть ли готовая продукция
                 finished_product = db.query(FinishedProduct).join(Film).filter(
-                    Film.code == code,
+                    Film.code == film_code,
                     FinishedProduct.thickness == thickness
                 ).first()
                 
@@ -1497,21 +1531,27 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                     
                     # Создаем производственный заказ
                     production_order = ProductionOrder(
+                        manager_id=message.from_user.id,
                         film_id=film.id,
                         panel_thickness=thickness,
                         panel_quantity=qty,
-                        status=ProductionOrderStatus.WAITING
+                        status="new"
                     )
                     
                     db.add(production_order)
                 
                 db.add(order_product)
             
+            # Обновляем общее количество панелей в заказе
+            order.panel_quantity = total_panels
+            
             # Если нужны стыки, добавляем их в заказ
+            total_joints = 0
             if need_joints and selected_joints:
                 for joint_key, joint_qty in selected_joints.items():
                     joint_type_val, thickness, color = joint_key.split('|')
                     thickness = float(thickness)
+                    total_joints += joint_qty
                     
                     # Преобразуем строковое значение типа стыка обратно в enum
                     joint_type_enum = None
@@ -1536,7 +1576,8 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                         # Создаем связь между заказом и стыком
                         order_joint = OrderJoint(
                             order_id=order.id,
-                            joint_id=joint.id,
+                            joint_type=joint_type_enum,
+                            joint_color=color,
                             quantity=joint_qty
                         )
                         db.add(order_joint)
@@ -1546,17 +1587,17 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                         
                         # Создаем операцию
                         operation = Operation(
-                            type=OperationType.JOINT_OUT,
-                            joint_id=joint.id,
+                            operation_type=OperationType.JOINT_OUT.value,
                             quantity=joint_qty,
-                            created_by=message.from_user.id
+                            user_id=message.from_user.id
                         )
                         db.add(operation)
             
+            # Обновляем общее количество стыков в заказе
+            order.joint_quantity = total_joints
+            
             # Если нужен клей, добавляем в заказ
-            if need_glue and data.get("glue_quantity", 0) > 0:
-                glue_quantity = data.get("glue_quantity")
-                
+            if need_glue and glue_quantity > 0:
                 # Получаем объект клея
                 glue = db.query(Glue).first()
                 
@@ -1574,10 +1615,9 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                     
                     # Создаем операцию
                     operation = Operation(
-                        type=OperationType.GLUE_OUT,
-                        glue_id=glue.id,
+                        operation_type=OperationType.GLUE_OUT.value,
                         quantity=glue_quantity,
-                        created_by=message.from_user.id
+                        user_id=message.from_user.id
                     )
                     db.add(operation)
             
@@ -1586,9 +1626,8 @@ async def process_order_confirmation(message: Message, state: FSMContext):
             
             # Формируем информацию о продуктах в заказе
             products_info = "Продукция:\n"
-            for code_thickness, qty in selected_products.items():
-                code, thickness = code_thickness.split('|')
-                products_info += f"▪️ {code} (толщина {thickness} мм): {qty} шт.\n"
+            for product in selected_products:
+                products_info += f"▪️ {product['film_code']} (толщина {product['thickness']} мм): {product['quantity']} шт.\n"
             
             # Формируем информацию о стыках в заказе
             joints_info = ""
@@ -1613,10 +1652,10 @@ async def process_order_confirmation(message: Message, state: FSMContext):
             if joints_info:
                 confirmation_message += joints_info
                 
-            confirmation_message += f"\n🧴 Клей: {data.get('glue_quantity', 0)} тюбиков"
-            confirmation_message += f"\n🔧 Монтаж: {'Требуется' if data.get('installation_required', False) else 'Не требуется'}"
-            confirmation_message += f"\n📞 Контактный телефон: {data.get('customer_phone', '')}"
-            confirmation_message += f"\n🚚 Адрес доставки: {data.get('delivery_address', '')}"
+            confirmation_message += f"\n🧴 Клей: {glue_quantity} тюбиков"
+            confirmation_message += f"\n🔧 Монтаж: {'Требуется' if installation_required else 'Не требуется'}"
+            confirmation_message += f"\n📞 Контактный телефон: {customer_phone}"
+            confirmation_message += f"\n🚚 Адрес доставки: {delivery_address}"
             
             # Сбрасываем состояние и отправляем подтверждение
             await state.set_state(MenuState.SALES_MAIN)
