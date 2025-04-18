@@ -62,6 +62,60 @@ async def check_sales_access(message: Message) -> bool:
     finally:
         db.close()
 
+@router.message(F.text == "📝 Составить заказ")
+async def handle_create_order(message: Message, state: FSMContext):
+    """Обработчик для создания нового заказа с выбором продуктов"""
+    if not await check_sales_access(message):
+        return
+    
+    # Получаем флаг админ-контекста
+    state_data = await state.get_data()
+    is_admin_context = state_data.get("is_admin_context", False)
+    
+    # Очищаем предыдущие данные состояния
+    await state.clear()
+    
+    # Устанавливаем флаг админ-контекста снова
+    if is_admin_context:
+        await state.update_data(is_admin_context=True)
+    
+    db = next(get_db())
+    try:
+        # Получаем список всех толщин панелей, для которых есть готовая продукция
+        thicknesses = db.query(FinishedProduct.thickness).distinct().all()
+        available_thicknesses = [str(thickness[0]) for thickness in thicknesses]
+        
+        # Если нет доступных толщин, сообщаем об этом
+        if not available_thicknesses:
+            await message.answer(
+                "На складе нет готовой продукции. Пожалуйста, обратитесь к производству.",
+                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
+            )
+            return
+        
+        # Формируем клавиатуру с доступными толщинами
+        keyboard_rows = []
+        for thickness in available_thicknesses:
+            keyboard_rows.append([KeyboardButton(text=thickness)])
+        keyboard_rows.append([KeyboardButton(text="◀️ Назад")])
+        
+        keyboard = ReplyKeyboardMarkup(
+            keyboard=keyboard_rows,
+            resize_keyboard=True
+        )
+        
+        await message.answer(
+            "Выберите толщину панелей (мм):",
+            reply_markup=keyboard
+        )
+        
+        # Устанавливаем начальное состояние для сбора продуктов
+        await state.update_data(selected_products=[])
+        await state.update_data(selected_joints=[])
+        await state.set_state(SalesStates.product_thickness)
+    finally:
+        db.close()
+
 @router.message(F.text == "📝 Заказать производство")
 async def handle_production_order(message: Message, state: FSMContext):
     if not await check_sales_access(message):
