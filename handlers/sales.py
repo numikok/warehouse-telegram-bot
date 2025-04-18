@@ -3,7 +3,7 @@ from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from models import User, UserRole, Film, Panel, Joint, Glue, FinishedProduct, Operation, JointType, Order, ProductionOrder, OrderStatus
+from models import User, UserRole, Film, Panel, Joint, Glue, FinishedProduct, Operation, JointType, Order, ProductionOrder, OrderStatus, OrderProduct, OrderJoint, OrderGlue
 from database import get_db
 import json
 import logging
@@ -41,6 +41,15 @@ class SalesStates(StatesGroup):
     waiting_for_order_customer_phone = State()
     waiting_for_order_delivery_address = State()
     waiting_for_order_confirmation = State()
+    selecting_products = State()
+    product_quantity = State()
+    add_more_products = State()
+    product_thickness = State()
+    current_thickness = State()
+    current_film_code = State()
+    selected_products = State()
+    selected_joints = State()
+    waiting_for_add_more_joints = State()
 
 async def check_sales_access(message: Message) -> bool:
     db = next(get_db())
@@ -395,22 +404,30 @@ async def process_joint_quantity(message: Message, state: FSMContext):
                 )
                 return
             
-            # Сохраняем количество стыков
-            await state.update_data(joint_quantity=quantity)
+            # Создаем уникальный ключ для стыка
+            joint_key = f"{joint_type.value}|{joint_thickness}|{joint_color}"
             
-            # Переходим к запросу о необходимости клея
-            keyboard = ReplyKeyboardMarkup(
-                keyboard=[
-                    [KeyboardButton(text="✅ Да"), KeyboardButton(text="❌ Нет")],
-                    [KeyboardButton(text="◀️ Назад")]
-                ],
-                resize_keyboard=True
-            )
+            # Получаем текущие выбранные стыки
+            selected_joints = data.get("selected_joints", {})
+            
+            # Добавляем или обновляем стык в списке
+            selected_joints[joint_key] = quantity
+            
+            # Сохраняем выбранные стыки
+            await state.update_data(selected_joints=selected_joints, joint_quantity=quantity)
+            
+            # Спрашиваем, нужны ли еще стыки
             await message.answer(
-                "Требуется ли клей?",
-                reply_markup=keyboard
+                f"✅ Добавлено в заказ: стык типа {joint_type.value}, толщиной {joint_thickness} мм, цвет {joint_color} - {quantity} шт.\n\nХотите добавить еще стыки?",
+                reply_markup=ReplyKeyboardMarkup(
+                    keyboard=[
+                        [KeyboardButton(text="✅ Да"), KeyboardButton(text="❌ Нет")],
+                        [KeyboardButton(text="◀️ Назад")]
+                    ],
+                    resize_keyboard=True
+                )
             )
-            await state.set_state(SalesStates.waiting_for_need_glue)
+            await state.set_state(SalesStates.waiting_for_add_more_joints)
         finally:
             db.close()
     except ValueError:
@@ -419,275 +436,13 @@ async def process_joint_quantity(message: Message, state: FSMContext):
             reply_markup=get_menu_keyboard(MenuState.SALES_CREATE_ORDER)
         )
 
-@router.message(SalesStates.waiting_for_glue_quantity)
-async def process_glue_quantity(message: Message, state: FSMContext):
-    """Обработка ввода количества клея"""
-    try:
-        quantity = int(message.text.strip())
-        if quantity < 0:
-            await message.answer(
-                "❌ Количество не может быть отрицательным",
-                reply_markup=get_menu_keyboard(MenuState.SALES_CREATE_ORDER)
-            )
-            return
-        
-        # Проверяем наличие достаточного количества клея
-        db = next(get_db())
-        try:
-            glue = db.query(Glue).first()
-            if not glue or glue.quantity < quantity:
-                available = glue.quantity if glue else 0
-                if quantity > 0:  # Только если пользователь запросил клей
-                    await message.answer(
-                        f"❌ Недостаточное количество клея (доступно: {available} тюбиков)",
-                        reply_markup=get_menu_keyboard(MenuState.SALES_CREATE_ORDER)
-                    )
-                    return
-            
-            # Сохраняем количество клея
-            await state.update_data(glue_quantity=quantity)
-            
-            # Переходим к запросу о монтаже
-            keyboard = ReplyKeyboardMarkup(
-                keyboard=[
-                    [KeyboardButton(text="✅ Да"), KeyboardButton(text="❌ Нет")],
-                    [KeyboardButton(text="◀️ Назад")]
-                ],
-                resize_keyboard=True
-            )
-            await message.answer(
-                "Требуется ли монтаж?",
-                reply_markup=keyboard
-            )
-            await state.set_state(SalesStates.waiting_for_order_installation)
-        finally:
-            db.close()
-    except ValueError:
-        await message.answer(
-            "❌ Пожалуйста, введите число",
-            reply_markup=get_menu_keyboard(MenuState.SALES_CREATE_ORDER)
-        )
-
-@router.message(SalesStates.waiting_for_installation)
-async def process_installation(message: Message, state: FSMContext):
-    """Обработка выбора монтажа"""
-    db = next(get_db())
-    try:
-        installation = message.text.strip().lower()
-        if installation not in ["да", "нет"]:
-            await message.answer("Неверный ответ. Пожалуйста, выберите из списка: да/нет")
-            return
-        
-        await state.update_data(installation=installation == "да")
-        await message.answer("Введите телефон клиента:")
-        await state.set_state(SalesStates.waiting_for_phone)
-    except ValueError:
-        await message.answer("❌ Пожалуйста, выберите монтаж из списка")
-
-@router.message(SalesStates.waiting_for_phone)
-async def process_phone(message: Message, state: FSMContext):
-    """Обработка ввода телефона клиента"""
-    db = next(get_db())
-    try:
-        phone = message.text.strip()
-        await state.update_data(phone=phone)
-        await message.answer("Введите адрес доставки:")
-        await state.set_state(SalesStates.waiting_for_address)
-    except ValueError:
-        await message.answer("❌ Пожалуйста, введите телефон клиента")
-
-@router.message(SalesStates.waiting_for_address)
-async def process_address(message: Message, state: FSMContext):
-    """Обработка ввода адреса доставки"""
-    db = next(get_db())
-    try:
-        address = message.text.strip()
-        await state.update_data(address=address)
-        await message.answer("Заказ успешно создан!")
-        await state.clear()
-    except ValueError:
-        await message.answer("❌ Пожалуйста, введите адрес доставки")
-
-@router.message(Command("stock"))
-async def cmd_stock(message: Message):
-    if not await check_sales_access(message):
-        return
-        
-    db = next(get_db())
-    try:
-        # Получаем остатки готовой продукции
-        finished_products = db.query(FinishedProduct).join(Film).all()
-        
-        if not finished_products:
-            await message.answer("На данный момент нет доступных продуктов на складе.")
-            return
-            
-        response = "Текущие запасы готовой продукции:\n\n"
-        
-        # Панели
-        response += "📦 Готовые панели:\n"
-        for product in finished_products:
-            response += f"Код панели: {product.film.code}\n"
-            response += f"Количество: {product.quantity} шт.\n\n"
-        
-        # Стыки
-        joints = db.query(Joint).all()
-        response += "🔄 Стыки:\n"
-        for joint in joints:
-            # Преобразуем тип стыка в понятный формат
-            joint_type_map = {
-                "butterfly": "бабочка",
-                "simple": "простой",
-                "closing": "замыкающий"
-            }
-            joint_type = joint_type_map.get(joint.type.value, joint.type.value)
-            
-            response += f"Цвет: {joint.color} ({joint_type})\n"
-            response += f"Количество: {joint.quantity} шт.\n\n"
-        
-        # Клей
-        glue = db.query(Glue).first()
-        response += "🧪 Клей:\n"
-        if glue:
-            response += f"Количество: {glue.quantity} шт.\n"
-        else:
-            response += "Нет в наличии\n"
-        
-        await message.answer(response)
-    finally:
-        db.close()
-
-@router.message(F.text == "📝 Составить заказ")
-async def handle_create_order(message: Message, state: FSMContext):
-    if not await check_sales_access(message):
-        return
-    
-    await state.set_state(MenuState.SALES_CREATE_ORDER)
-    db = next(get_db())
-    try:
-        # Получаем список доступных цветов пленки
-        finished_products = db.query(FinishedProduct).join(Film).all()
-        films = db.query(Film).all()
-        
-        # Список готовой продукции
-        ready_products = []
-        if finished_products:
-            for product in finished_products:
-                if product.quantity > 0:
-                    ready_products.append(f"• {product.film.code} (готовая продукция: {product.quantity} шт.)")
-        
-        # Список продукции, которую можно произвести
-        manufacturable_products = []
-        for film in films:
-            if film.total_remaining > 0:
-                possible_panels = film.calculate_possible_panels()
-                if possible_panels > 0:
-                    manufacturable_products.append(f"• {film.code} (можно произвести: {possible_panels} панелей)")
-        
-        # Формируем сообщение с разделением на категории
-        message_text = ""
-        
-        if ready_products:
-            message_text += "🎨 Доступные цвета готовой продукции:\n"
-            message_text += "\n".join(ready_products)
-            message_text += "\n\n"  # Пустая строка для разделения
-        
-        if manufacturable_products:
-            message_text += "🛠 Цвета, которые можно произвести из текущих материалов:\n"
-            message_text += "\n".join(manufacturable_products)
-        
-        if not ready_products and not manufacturable_products:
-            await message.answer(
-                "В настоящее время нет доступных цветов пленки для заказа.",
-                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
-            )
-            return
-        
-        await message.answer(
-            message_text,
-            reply_markup=get_menu_keyboard(MenuState.SALES_CREATE_ORDER)
-        )
-        await state.set_state(SalesStates.waiting_for_order_film_color)
-    finally:
-        db.close()
-
-@router.message(SalesStates.waiting_for_order_film_color)
-async def process_order_film_color(message: Message, state: FSMContext):
-    """Обработка выбора цвета пленки для заказа"""
-    db = next(get_db())
-    try:
-        film_code = message.text.strip()
-        film = db.query(Film).filter(Film.code == film_code).first()
-        
-        if not film:
-            await message.answer(
-                "❌ Пленка с таким кодом не найдена. Пожалуйста, выберите из списка:",
-                reply_markup=get_menu_keyboard(MenuState.SALES_CREATE_ORDER)
-            )
-            return
-        
-        # Сохраняем выбранный цвет пленки
-        await state.update_data(film_code=film_code)
-        
-        # Проверяем наличие готовой продукции
-        finished_product = db.query(FinishedProduct).join(Film).filter(Film.code == film_code).first()
-        available_quantity = 0
-        if finished_product:
-            available_quantity = finished_product.quantity
-        
-        # Запрашиваем количество панелей
-        await message.answer(
-            f"Введите количество панелей (доступно готовой продукции: {available_quantity} шт.):",
-            reply_markup=get_menu_keyboard(MenuState.SALES_CREATE_ORDER)
-        )
-        await state.set_state(SalesStates.waiting_for_order_panel_quantity)
-    finally:
-        db.close()
-
-@router.message(SalesStates.waiting_for_order_panel_quantity)
-async def process_order_panel_quantity(message: Message, state: FSMContext):
-    """Обработка ввода количества панелей для заказа"""
-    try:
-        quantity = int(message.text.strip())
-        if quantity <= 0:
-            await message.answer(
-                "❌ Количество должно быть больше 0",
-                reply_markup=get_menu_keyboard(MenuState.SALES_CREATE_ORDER)
-            )
-            return
-        
-        # Сохраняем количество панелей
-        await state.update_data(panel_quantity=quantity)
-        
-        # Запрашиваем необходимость стыков
-        keyboard = ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="✅ Да"), KeyboardButton(text="❌ Нет")],
-                [KeyboardButton(text="◀️ Назад")]
-            ],
-            resize_keyboard=True
-        )
-        await message.answer(
-            "Требуются ли стыки?",
-            reply_markup=keyboard
-        )
-        await state.set_state(SalesStates.waiting_for_need_joints)
-    except ValueError:
-        await message.answer(
-            "❌ Пожалуйста, введите число",
-            reply_markup=get_menu_keyboard(MenuState.SALES_CREATE_ORDER)
-        )
-
-@router.message(SalesStates.waiting_for_need_joints)
-async def process_need_joints(message: Message, state: FSMContext):
-    """Обработка ответа на вопрос о необходимости стыков"""
+@router.message(SalesStates.waiting_for_add_more_joints)
+async def process_add_more_joints(message: Message, state: FSMContext):
+    """Обработка ответа на вопрос о добавлении еще стыков"""
     response = message.text.strip()
     
     if response == "✅ Да":
-        # Пользователь хочет стыки
-        await state.update_data(need_joints=True)
-        
-        # Сразу показываем доступные стыки
+        # Пользователь хочет еще стыки, показываем снова доступные стыки
         db = next(get_db())
         try:
             # Группируем стыки по типу и показываем количество
@@ -725,26 +480,24 @@ async def process_need_joints(message: Message, state: FSMContext):
                         joints_info += ", ".join([f"{j.color} ({j.quantity} шт.)" for j in thickness_joints])
                         joints_info += "\n"
             
-            if not butterfly_joints and not simple_joints and not closing_joints:
-                joints_info = "❌ Нет доступных стыков на складе"
-                # Если нет стыков, переходим к вопросу о клее
-                await state.update_data(need_joints=False, joint_type=None, joint_thickness=None, joint_color=None, joint_quantity=0)
-                
-                # Запрашиваем необходимость клея
-                keyboard = ReplyKeyboardMarkup(
-                    keyboard=[
-                        [KeyboardButton(text="✅ Да"), KeyboardButton(text="❌ Нет")],
-                        [KeyboardButton(text="◀️ Назад")]
-                    ],
-                    resize_keyboard=True
-                )
-                await message.answer(
-                    joints_info + "\n\nТребуется ли клей?",
-                    reply_markup=keyboard
-                )
-                await state.set_state(SalesStates.waiting_for_need_glue)
-                return
+            # Получаем уже выбранные стыки для отображения
+            data = await state.get_data()
+            selected_joints = data.get("selected_joints", {})
             
+            if selected_joints:
+                joints_info += "\nУже выбранные стыки:\n"
+                for joint_key, quantity in selected_joints.items():
+                    joint_type_val, thickness, color = joint_key.split('|')
+                    joint_type_text = ""
+                    if joint_type_val == "butterfly":
+                        joint_type_text = "Бабочка"
+                    elif joint_type_val == "simple":
+                        joint_type_text = "Простые"
+                    elif joint_type_val == "closing":
+                        joint_type_text = "Замыкающие"
+                    
+                    joints_info += f"• {joint_type_text}, {thickness} мм, {color}: {quantity} шт.\n"
+                
             # Запрашиваем тип стыка
             keyboard = ReplyKeyboardMarkup(
                 keyboard=[
@@ -764,9 +517,6 @@ async def process_need_joints(message: Message, state: FSMContext):
         finally:
             db.close()
     elif response == "❌ Нет":
-        # Пользователь не хочет стыки
-        await state.update_data(need_joints=False, joint_type=None, joint_thickness=None, joint_color=None, joint_quantity=0)
-        
         # Переходим к запросу о необходимости клея
         keyboard = ReplyKeyboardMarkup(
             keyboard=[
@@ -780,10 +530,40 @@ async def process_need_joints(message: Message, state: FSMContext):
             reply_markup=keyboard
         )
         await state.set_state(SalesStates.waiting_for_need_glue)
+    elif response == "◀️ Назад":
+        # Возвращаемся к вводу количества стыков
+        data = await state.get_data()
+        joint_type = data.get('joint_type')
+        joint_thickness = data.get('joint_thickness')
+        joint_color = data.get('joint_color', '')
+        
+        db = next(get_db())
+        try:
+            joint = db.query(Joint).filter(
+                Joint.type == joint_type,
+                Joint.thickness == joint_thickness,
+                Joint.color == joint_color
+            ).first()
+            
+            available_quantity = joint.quantity if joint else 0
+            
+            await message.answer(
+                f"Введите количество стыков (доступно: {available_quantity} шт.):",
+                reply_markup=get_menu_keyboard(MenuState.SALES_CREATE_ORDER)
+            )
+            await state.set_state(SalesStates.waiting_for_order_joint_quantity)
+        finally:
+            db.close()
     else:
         await message.answer(
-            "Пожалуйста, выберите один из вариантов: ✅ Да или ❌ Нет",
-            reply_markup=get_menu_keyboard(MenuState.SALES_CREATE_ORDER)
+            "Пожалуйста, выберите один из вариантов: ✅ Да, ❌ Нет или ◀️ Назад",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[
+                    [KeyboardButton(text="✅ Да"), KeyboardButton(text="❌ Нет")],
+                    [KeyboardButton(text="◀️ Назад")]
+                ],
+                resize_keyboard=True
+            )
         )
 
 @router.message(SalesStates.waiting_for_order_joint_type)
@@ -928,64 +708,6 @@ async def process_order_joint_color(message: Message, state: FSMContext):
         await state.set_state(SalesStates.waiting_for_order_joint_quantity)
     finally:
         db.close()
-
-@router.message(SalesStates.waiting_for_order_joint_quantity)
-async def process_order_joint_quantity(message: Message, state: FSMContext):
-    """Обработка ввода количества стыков"""
-    try:
-        quantity = int(message.text.strip())
-        if quantity <= 0:
-            await message.answer(
-                "❌ Количество должно быть больше 0",
-                reply_markup=get_menu_keyboard(MenuState.SALES_CREATE_ORDER)
-            )
-            return
-        
-        # Проверяем наличие достаточного количества стыков
-        db = next(get_db())
-        try:
-            data = await state.get_data()
-            joint_type = data.get('joint_type')
-            joint_thickness = data.get('joint_thickness')
-            joint_color = data.get('joint_color', '')
-            
-            joint = db.query(Joint).filter(
-                Joint.type == joint_type,
-                Joint.thickness == joint_thickness,
-                Joint.color == joint_color
-            ).first()
-            
-            if not joint or joint.quantity < quantity:
-                available = joint.quantity if joint else 0
-                await message.answer(
-                    f"❌ Недостаточное количество стыков (доступно: {available} шт.)",
-                    reply_markup=get_menu_keyboard(MenuState.SALES_CREATE_ORDER)
-                )
-                return
-            
-            # Сохраняем количество стыков
-            await state.update_data(joint_quantity=quantity)
-            
-            # Переходим к запросу о необходимости клея
-            keyboard = ReplyKeyboardMarkup(
-                keyboard=[
-                    [KeyboardButton(text="✅ Да"), KeyboardButton(text="❌ Нет")],
-                    [KeyboardButton(text="◀️ Назад")]
-                ],
-                resize_keyboard=True
-            )
-            await message.answer(
-                "Требуется ли клей?",
-                reply_markup=keyboard
-            )
-            await state.set_state(SalesStates.waiting_for_need_glue)
-        finally:
-            db.close()
-    except ValueError:
-        await message.answer(
-            "❌ Пожалуйста, введите число",
-            reply_markup=get_menu_keyboard(MenuState.SALES_CREATE_ORDER)
-        )
 
 @router.message(SalesStates.waiting_for_order_glue_quantity)
 async def process_order_glue_quantity(message: Message, state: FSMContext):
@@ -1153,70 +875,225 @@ async def process_order_confirmation(message: Message, state: FSMContext):
     response = message.text.strip()
     
     if response == "✅ Подтвердить":
-        # Сохраняем заказ в базе данных
+        # Получаем все данные состояния
+        data = await state.get_data()
+        
+        # Получаем выбранные продукты из состояния
+        selected_products = data.get("selected_products", {})
+        
+        # Получаем выбранные стыки из состояния
+        selected_joints = data.get("selected_joints", {})
+        
+        need_joints = len(selected_joints) > 0
+        need_glue = data.get("need_glue", False)
+        customer_name = data.get("customer_name")
+        delivery_address = data.get("delivery_address")
+        
+        # Определяем тип заказа (готовая продукция или производство)
         db = next(get_db())
+        
         try:
-            data = await state.get_data()
-            user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
-            
-            # Проверяем наличие стыков, если нет - используем значение по умолчанию
-            need_joints = data.get('need_joints', False)
-            joint_type = data.get('joint_type') if need_joints else JointType.SIMPLE  # Используем SIMPLE как тип по умолчанию
-            joint_color = data.get('joint_color', '') if need_joints else ''
-            joint_quantity = data.get('joint_quantity', 0) if need_joints else 0
-
-            # Создаем новый заказ
-            new_order = Order(
-                manager_id=user.id,
-                film_code=data.get('film_code', ''),
-                panel_quantity=data.get('panel_quantity', 0),
-                joint_type=joint_type,  # Теперь всегда будет иметь значение
-                joint_color=joint_color,
-                joint_quantity=joint_quantity,
-                glue_quantity=data.get('glue_quantity', 0),
-                installation_required=data.get('installation_required', False),
-                customer_phone=data.get('customer_phone', ''),
-                delivery_address=data.get('delivery_address', ''),
-                status=OrderStatus.NEW
+            # Создаем заказ
+            order = Order(
+                customer_name=customer_name,
+                delivery_address=delivery_address,
+                status=OrderStatus.CREATED
             )
+            db.add(order)
+            db.flush()
             
-            db.add(new_order)
+            # Добавляем продукты в заказ
+            for code_thickness, qty in selected_products.items():
+                code, thickness = code_thickness.split('|')
+                thickness = float(thickness)
+                
+                film = db.query(Film).filter(Film.code == code).first()
+                if not film:
+                    continue
+                
+                # Проверяем, есть ли готовая продукция
+                finished_product = db.query(FinishedProduct).join(Film).filter(
+                    Film.code == code,
+                    FinishedProduct.thickness == thickness
+                ).first()
+                
+                if finished_product and finished_product.quantity >= qty:
+                    # Если есть готовая продукция, используем её
+                    order_product = OrderProduct(
+                        order_id=order.id,
+                        film_id=film.id,
+                        thickness=thickness,
+                        quantity=qty,
+                        is_finished=True
+                    )
+                    
+                    # Уменьшаем количество готовой продукции на складе
+                    finished_product.quantity -= qty
+                    
+                    # Создаем операцию для готовой продукции
+                    operation = Operation(
+                        type=OperationType.READY_PRODUCT_OUT,
+                        film_id=film.id,
+                        quantity=qty,
+                        created_by=message.from_user.id
+                    )
+                    
+                    db.add(operation)
+                else:
+                    # Если нет готовой продукции, создаем заказ на производство
+                    order_product = OrderProduct(
+                        order_id=order.id,
+                        film_id=film.id,
+                        thickness=thickness,
+                        quantity=qty,
+                        is_finished=False
+                    )
+                    
+                    # Создаем производственный заказ
+                    production_order = ProductionOrder(
+                        film_id=film.id,
+                        panel_thickness=thickness,
+                        panel_quantity=qty,
+                        status=ProductionOrderStatus.WAITING
+                    )
+                    
+                    db.add(production_order)
+                
+                db.add(order_product)
+            
+            # Если нужны стыки, добавляем их в заказ
+            if need_joints and selected_joints:
+                for joint_key, joint_qty in selected_joints.items():
+                    joint_type_val, thickness, color = joint_key.split('|')
+                    thickness = float(thickness)
+                    
+                    # Преобразуем строковое значение типа стыка обратно в enum
+                    joint_type_enum = None
+                    if joint_type_val == "butterfly":
+                        joint_type_enum = JointType.BUTTERFLY
+                    elif joint_type_val == "simple":
+                        joint_type_enum = JointType.SIMPLE
+                    elif joint_type_val == "closing":
+                        joint_type_enum = JointType.CLOSING
+                        
+                    if not joint_type_enum:
+                        continue
+                        
+                    # Находим соответствующий стык в базе
+                    joint = db.query(Joint).filter(
+                        Joint.type == joint_type_enum,
+                        Joint.thickness == thickness,
+                        Joint.color == color
+                    ).first()
+                    
+                    if joint and joint.quantity >= joint_qty:
+                        # Создаем связь между заказом и стыком
+                        order_joint = OrderJoint(
+                            order_id=order.id,
+                            joint_id=joint.id,
+                            quantity=joint_qty
+                        )
+                        db.add(order_joint)
+                        
+                        # Уменьшаем количество стыков на складе
+                        joint.quantity -= joint_qty
+                        
+                        # Создаем операцию
+                        operation = Operation(
+                            type=OperationType.JOINT_OUT,
+                            joint_id=joint.id,
+                            quantity=joint_qty,
+                            created_by=message.from_user.id
+                        )
+                        db.add(operation)
+            
+            # Если нужен клей, добавляем в заказ
+            if need_glue and data.get("glue_quantity", 0) > 0:
+                glue_quantity = data.get("glue_quantity")
+                
+                # Получаем объект клея
+                glue = db.query(Glue).first()
+                
+                if glue and glue.quantity >= glue_quantity:
+                    # Связываем заказ с клеем
+                    order_glue = OrderGlue(
+                        order_id=order.id,
+                        glue_id=glue.id,
+                        quantity=glue_quantity
+                    )
+                    db.add(order_glue)
+                    
+                    # Уменьшаем количество клея на складе
+                    glue.quantity -= glue_quantity
+                    
+                    # Создаем операцию
+                    operation = Operation(
+                        type=OperationType.GLUE_OUT,
+                        glue_id=glue.id,
+                        quantity=glue_quantity,
+                        created_by=message.from_user.id
+                    )
+                    db.add(operation)
+            
+            # Сохраняем изменения в базе данных
             db.commit()
             
-            # Отправляем подтверждение пользователю
+            # Формируем информацию о продуктах в заказе
+            products_info = "Продукция:\n"
+            for code_thickness, qty in selected_products.items():
+                code, thickness = code_thickness.split('|')
+                products_info += f"▪️ {code} (толщина {thickness} мм): {qty} шт.\n"
+            
+            # Формируем информацию о стыках в заказе
+            joints_info = ""
+            if need_joints and selected_joints:
+                joints_info = "\nСтыки:\n"
+                for joint_key, quantity in selected_joints.items():
+                    joint_type_val, thickness, color = joint_key.split('|')
+                    joint_type_text = ""
+                    if joint_type_val == "butterfly":
+                        joint_type_text = "Бабочка"
+                    elif joint_type_val == "simple":
+                        joint_type_text = "Простые"
+                    elif joint_type_val == "closing":
+                        joint_type_text = "Замыкающие"
+                    
+                    joints_info += f"▪️ {joint_type_text}, {thickness} мм, {color}: {quantity} шт.\n"
+            
+            # Формируем итоговое сообщение
+            confirmation_message = f"✅ Заказ #{order.id} успешно создан!\n\n"
+            confirmation_message += products_info
+            
+            if joints_info:
+                confirmation_message += joints_info
+                
+            confirmation_message += f"\n🧴 Клей: {data.get('glue_quantity', 0)} тюбиков"
+            confirmation_message += f"\n🔧 Монтаж: {'Требуется' if data.get('installation_required', False) else 'Не требуется'}"
+            confirmation_message += f"\n📞 Контактный телефон: {data.get('customer_phone', '')}"
+            confirmation_message += f"\n🚚 Адрес доставки: {data.get('delivery_address', '')}"
+            
+            # Сбрасываем состояние и отправляем подтверждение
+            await state.set_state(MenuState.SALES_MAIN)
             await message.answer(
-                f"✅ Заказ #{new_order.id} успешно создан!\n\n" + data.get('order_summary', ''),
+                confirmation_message,
                 reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
             )
-            await state.set_state(MenuState.SALES_MAIN)
-            
-            # Уведомляем склад о новом заказе
-            warehouse_users = db.query(User).filter(User.role == UserRole.WAREHOUSE).all()
-            for wh_user in warehouse_users:
-                try:
-                    await message.bot.send_message(
-                        wh_user.telegram_id,
-                        f"📦 Новый заказ #{new_order.id}!\n\n" + data.get('order_summary', '')
-                    )
-                except Exception as e:
-                    logging.error(f"Не удалось отправить уведомление складовщику {wh_user.telegram_id}: {str(e)}")
-            
         except Exception as e:
-            logging.error(f"Ошибка при создании заказа: {str(e)}")
+            db.rollback()
+            logging.error(f"Error creating order: {e}")
             await message.answer(
-                f"❌ Ошибка при создании заказа: {str(e)}",
+                f"❌ Произошла ошибка при создании заказа: {e}",
                 reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
             )
-            await state.set_state(MenuState.SALES_MAIN)
         finally:
             db.close()
     elif response == "❌ Отменить":
         # Отменяем заказ
+        await state.set_state(MenuState.SALES_MAIN)
         await message.answer(
-            "❌ Заказ отменен",
+            "Заказ отменен.",
             reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
         )
-        await state.set_state(MenuState.SALES_MAIN)
     else:
         await message.answer(
             "Пожалуйста, выберите один из вариантов: ✅ Подтвердить или ❌ Отменить",
