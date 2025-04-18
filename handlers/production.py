@@ -16,6 +16,7 @@ from navigation import MenuState, get_menu_keyboard, go_back, get_back_keyboard,
 from states import ProductionStates
 from utils import check_production_access, get_role_menu_keyboard
 from handlers.sales import handle_warehouse_order, handle_stock
+from handlers.warehouse import cmd_stock
 
 logging.basicConfig(level=logging.INFO)
 
@@ -1764,3 +1765,137 @@ async def debug_defect_type_handler(message: Message, state: FSMContext):
     else:
         logging.info(f"Неизвестная кнопка: '{message.text}'")
         await message.answer("Пожалуйста, выберите тип брака из предложенных вариантов.")
+
+@router.message(ProductionStates.waiting_for_panel_thickness)
+async def process_panel_thickness(message: Message, state: FSMContext):
+    logging.info(f"Обработка выбора толщины панелей: {message.text}")
+    
+    if message.text == "◀️ Назад":
+        logging.info("Пользователь вернулся в меню материалов")
+        await state.set_state(MenuState.PRODUCTION_MATERIALS)
+        await message.answer(
+            "Выберите тип материала:",
+            reply_markup=get_menu_keyboard(MenuState.PRODUCTION_MATERIALS)
+        )
+        return
+    
+    try:
+        thickness = float(message.text.strip())
+        if thickness not in [0.5, 0.8]:
+            logging.warning(f"Указана некорректная толщина панели: {thickness}")
+            await message.answer("Пожалуйста, выберите толщину 0.5 или 0.8 мм.")
+            return
+        
+        # Сохраняем толщину в состоянии
+        await state.update_data(panel_thickness=thickness)
+        logging.info(f"Установлена толщина панели: {thickness}")
+        
+        # Запрашиваем количество панелей
+        await message.answer(
+            f"Введите количество панелей толщиной {thickness} мм:",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="◀️ Назад")]],
+                resize_keyboard=True
+            )
+        )
+        await state.set_state(ProductionStates.waiting_for_panel_quantity)
+        logging.info("Установлено состояние: waiting_for_panel_quantity")
+    except ValueError:
+        logging.error(f"Ошибка при обработке толщины панели: {message.text}")
+        await message.answer("Пожалуйста, введите корректное число (0.5 или 0.8).")
+
+@router.message(ProductionStates.waiting_for_panel_quantity)
+async def process_panel_quantity(message: Message, state: FSMContext):
+    logging.info(f"Обработка ввода количества панелей: {message.text}")
+    
+    if message.text == "◀️ Назад":
+        logging.info("Возврат к выбору толщины панелей")
+        
+        # Возвращаемся к выбору толщины
+        keyboard = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="0.5")],
+                [KeyboardButton(text="0.8")],
+                [KeyboardButton(text="◀️ Назад")]
+            ],
+            resize_keyboard=True
+        )
+        
+        await message.answer(
+            "Выберите толщину панелей (мм):",
+            reply_markup=keyboard
+        )
+        await state.set_state(ProductionStates.waiting_for_panel_thickness)
+        return
+    
+    try:
+        quantity = int(message.text.strip())
+        if quantity <= 0:
+            logging.warning(f"Указано некорректное количество панелей: {quantity}")
+            await message.answer("Пожалуйста, введите положительное число.")
+            return
+        
+        # Получаем данные из состояния
+        data = await state.get_data()
+        thickness = data.get("panel_thickness", 0.5)
+        
+        logging.info(f"Добавление {quantity} панелей толщиной {thickness} мм")
+        
+        db = next(get_db())
+        try:
+            # Проверяем, есть ли уже панели с такой толщиной
+            panel = db.query(Panel).filter(Panel.thickness == thickness).first()
+            
+            if panel:
+                # Если панели существуют, увеличиваем их количество
+                previous_quantity = panel.quantity
+                panel.quantity += quantity
+                logging.info(f"Обновлено количество панелей толщиной {thickness} мм: было {previous_quantity}, стало {panel.quantity}")
+            else:
+                # Если панелей с такой толщиной нет, создаем новую запись
+                panel = Panel(thickness=thickness, quantity=quantity)
+                db.add(panel)
+                logging.info(f"Создана новая запись для панелей толщиной {thickness} мм с количеством {quantity}")
+            
+            # Получаем пользователя из базы данных
+            user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
+            
+            # Создаем запись операции
+            operation = Operation(
+                user_id=user.id,
+                operation_type="panel_income",
+                quantity=quantity,
+                details=json.dumps({
+                    "panel_thickness": thickness,
+                    "previous_quantity": previous_quantity if panel else 0,
+                    "new_quantity": panel.quantity
+                })
+            )
+            db.add(operation)
+            
+            # Сохраняем изменения
+            db.commit()
+            logging.info("Изменения сохранены в базе данных")
+            
+            # Возвращаемся в меню материалов
+            await state.set_state(MenuState.PRODUCTION_MATERIALS)
+            
+            await message.answer(
+                f"✅ Добавлено {quantity} панелей толщиной {thickness} мм.\n"
+                f"Теперь у вас {panel.quantity} панелей толщиной {thickness} мм.",
+                reply_markup=get_menu_keyboard(MenuState.PRODUCTION_MATERIALS)
+            )
+            logging.info(f"Отправлено сообщение о добавлении панелей")
+            
+        finally:
+            db.close()
+            
+    except ValueError:
+        logging.error(f"Ошибка при обработке количества панелей: {message.text}")
+        await message.answer("Пожалуйста, введите целое число.")
+
+@router.message(F.text == "📦 Остатки")
+async def handle_stock(message: Message, state: FSMContext):
+    # Просто устанавливаем состояние и вызываем cmd_stock
+    await state.set_state(MenuState.PRODUCTION_MAIN)
+    await cmd_stock(message, state)

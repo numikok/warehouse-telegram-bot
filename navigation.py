@@ -90,10 +90,11 @@ def get_menu_keyboard(menu_state: MenuState, is_admin_context: bool = False) -> 
     keyboards = {
         # Главное меню производства
         MenuState.PRODUCTION_MAIN: [
-            [KeyboardButton(text="📋 Заказы на производство")],
             [KeyboardButton(text="📥 Приход сырья")],
             [KeyboardButton(text="🛠 Производство")],
-            [KeyboardButton(text="🚫 Брак")]
+            [KeyboardButton(text="📋 Заказы на производство")],
+            [KeyboardButton(text="🚫 Брак")],
+            [KeyboardButton(text="📊 Остатки")]
         ],
         
         # Подменю производства

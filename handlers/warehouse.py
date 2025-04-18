@@ -29,20 +29,22 @@ class WarehouseStates(StatesGroup):
 
 @router.message(Command("stock"))
 async def cmd_stock(message: Message, state: FSMContext):
-    if not await check_warehouse_access(message):
-        return
-        
+    # Не проверяем доступ, так как эта функция теперь может вызываться с разными ролями
+    
     db = next(get_db())
     try:
-        # Получаем флаг админ-контекста
         state_data = await state.get_data()
         is_admin_context = state_data.get("is_admin_context", False)
+        
+        # Получаем текущую роль пользователя для выбора правильной клавиатуры
+        user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
+        user_role = user.role if user else UserRole.NONE
         
         # Получаем остатки по всем материалам
         films = db.query(Film).all()
         joints = db.query(Joint).all()
         glue = db.query(Glue).first()
-        panels = db.query(Panel).first()
+        panels = db.query(Panel).all()  # Получаем все панели вместо одной
         finished_products = db.query(FinishedProduct).join(Film).all()
         
         # Формируем отчет по пленкам
@@ -68,7 +70,8 @@ async def cmd_stock(message: Message, state: FSMContext):
         
         response += "\n📦 Пустые панели:\n"
         if panels:
-            response += f"Количество: {panels.quantity}\n"
+            for panel in panels:
+                response += f"- Толщина {panel.thickness} мм: {panel.quantity} шт.\n"
         else:
             response += "Нет в наличии\n"
             
@@ -81,15 +84,20 @@ async def cmd_stock(message: Message, state: FSMContext):
         response += "\n✅ Готовые панели:\n"
         if finished_products:
             for product in finished_products:
-                response += f"- {product.film.code}: {product.quantity} шт.\n"
+                response += f"- {product.film.code} (толщина {product.thickness} мм): {product.quantity} шт.\n"
         else:
             response += "Нет в наличии\n"
         
-        # Используем get_menu_keyboard с флагом is_admin_context
-        await message.answer(
-            response,
-            reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_MAIN, is_admin_context=is_admin_context)
-        )
+        # Выбираем правильную клавиатуру в зависимости от роли пользователя
+        if user_role == UserRole.WAREHOUSE:
+            keyboard = get_menu_keyboard(MenuState.WAREHOUSE_MAIN, is_admin_context)
+        elif user_role == UserRole.PRODUCTION:
+            keyboard = get_menu_keyboard(MenuState.PRODUCTION_MAIN)
+        else:
+            # Для суперадмина и других ролей
+            keyboard = get_menu_keyboard(MenuState.SUPER_ADMIN_MAIN) if user_role == UserRole.SUPER_ADMIN else None
+        
+        await message.answer(response, reply_markup=keyboard)
     finally:
         db.close()
 
@@ -369,67 +377,8 @@ async def handle_orders(message: Message, state: FSMContext):
 
 @router.message(F.text == "📦 Остатки")
 async def handle_stock(message: Message, state: FSMContext):
-    if not await check_warehouse_access(message):
-        return
-        
-    db = next(get_db())
-    try:
-        state_data = await state.get_data()
-        is_admin_context = state_data.get("is_admin_context", False)
-        
-        # Получаем остатки по всем материалам
-        films = db.query(Film).all()
-        joints = db.query(Joint).all()
-        glue = db.query(Glue).first()
-        panels = db.query(Panel).first()
-        finished_products = db.query(FinishedProduct).join(Film).all()
-        
-        # Формируем отчет по пленкам
-        response = "📊 Остатки на складе:\n\n"
-        
-        response += "🎞 Пленки:\n"
-        for film in films:
-            meters_per_roll = film.meters_per_roll or 50.0  # По умолчанию 50 метров в рулоне
-            rolls = film.total_remaining / meters_per_roll if meters_per_roll > 0 else 0
-            response += (
-                f"- {film.code}:\n"
-                f"  • Рулонов: {rolls:.1f}\n"
-                f"  • Общая длина: {film.total_remaining:.2f} м\n"
-                f"  • Можно произвести панелей: {film.calculate_possible_panels()}\n\n"
-            )
-        
-        response += "🔄 Стыки:\n"
-        for joint in joints:
-            response += (
-                f"- {joint.color} ({joint.type.value}, {joint.thickness} мм):\n"
-                f"  • Количество: {joint.quantity}\n"
-            )
-        
-        response += "\n📦 Пустые панели:\n"
-        if panels:
-            response += f"Количество: {panels.quantity}\n"
-        else:
-            response += "Нет в наличии\n"
-            
-        response += "\n🧪 Клей:\n"
-        if glue:
-            response += f"Количество: {glue.quantity}\n"
-        else:
-            response += "Нет в наличии\n"
-            
-        response += "\n✅ Готовые панели:\n"
-        if finished_products:
-            for product in finished_products:
-                response += f"- {product.film.code}: {product.quantity} шт.\n"
-        else:
-            response += "Нет в наличии\n"
-        
-        await message.answer(
-            response,
-            reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_STOCK, is_admin_context)
-        )
-    finally:
-        db.close()
+    await state.set_state(MenuState.WAREHOUSE_STOCK)
+    await cmd_stock(message, state)
 
 @router.message(Command("start"))
 async def cmd_start(message: Message, state: FSMContext):
