@@ -72,6 +72,7 @@ class SalesStates(StatesGroup):
     
     # Состояния для множественного выбора продуктов
     selecting_products = State()
+    product_thickness = State()
     product_quantity = State()
     add_more_products = State()
     
@@ -95,6 +96,7 @@ class SalesStates(StatesGroup):
     waiting_for_order_joint_thickness = State()
     waiting_for_order_joint_color = State()
     waiting_for_order_joint_quantity = State()
+    waiting_for_add_more_joints = State()
     waiting_for_order_glue_quantity = State()
     waiting_for_order_installation = State()
     waiting_for_order_customer_phone = State()
