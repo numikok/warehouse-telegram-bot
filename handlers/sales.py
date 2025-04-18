@@ -99,11 +99,12 @@ async def handle_warehouse_order(message: Message, state: FSMContext):
             )
             return
         
-        # Формируем список доступной продукции
+        # Формируем сообщение о доступной продукции
         products_info = []
         for product in finished_products:
-            if product.quantity > 0:
-                products_info.append(f"- {product.film.code}: {product.quantity} шт.")
+            products_info.append(
+                f"• Панели с пленкой {product.film.code} (толщина: {product.thickness} мм): {product.quantity} шт."
+            )
         
         if not products_info:
             await message.answer(

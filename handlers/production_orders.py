@@ -232,13 +232,15 @@ async def handle_order_completed(message: Message):
 
         # Добавляем готовую продукцию
         finished_product = db.query(FinishedProduct).filter(
-            FinishedProduct.film_id == film.id
+            FinishedProduct.film_id == film.id,
+            FinishedProduct.thickness == order.panel_thickness  # Учитываем толщину панелей
         ).first()
         
         if not finished_product:
             finished_product = FinishedProduct(
                 film_id=film.id,
-                quantity=0
+                quantity=0,
+                thickness=order.panel_thickness  # Указываем толщину панелей
             )
             db.add(finished_product)
             

@@ -92,6 +92,7 @@ class FinishedProduct(Base):
     id = Column(Integer, primary_key=True)
     film_id = Column(Integer, ForeignKey('films.id'), nullable=False)
     quantity = Column(Integer, default=0)
+    thickness = Column(Float, nullable=False, default=0.5)  # Толщина панели (0.5 или 0.8)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     

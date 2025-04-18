@@ -143,7 +143,8 @@ async def process_confirmation(message: Message, state: FSMContext):
         
         # Получаем информацию о материалах
         finished_product = db.query(FinishedProduct).join(Film).filter(
-            Film.code == order.film_code
+            Film.code == order.film_code,
+            FinishedProduct.thickness == order.panel_thickness  # Проверяем толщину
         ).first()
         
         # Проверяем наличие материалов
@@ -495,7 +496,8 @@ async def process_order_shipment(message: Message, order_id: int):
         
         # Получаем информацию о материалах
         finished_product = db.query(FinishedProduct).join(Film).filter(
-            Film.code == order.film_code
+            Film.code == order.film_code,
+            FinishedProduct.thickness == order.panel_thickness  # Проверяем толщину
         ).first()
         
         # Проверяем наличие материалов
