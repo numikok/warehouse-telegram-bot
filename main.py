@@ -336,18 +336,10 @@ async def button_warehouse_stock(message: Message, state: FSMContext):
 async def button_production_stock(message: Message, state: FSMContext):
     logging.info(f"Нажата кнопка 'Остатки' пользователем {message.from_user.id}")
     
-    # Получаем текущую роль пользователя
-    db = next(get_db())
-    try:
-        user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
-        if user and user.role == UserRole.PRODUCTION:
-            # Для роли производства используем обработчик остатков из warehouse
-            await warehouse.cmd_stock(message, state)
-        else:
-            # Для других ролей просто возвращаемся в меню
-            await message.answer("У вас нет доступа к этой функции.")
-    finally:
-        db.close()
+    # Устанавливаем состояние для просмотра остатков
+    await state.set_state(MenuState.PRODUCTION_MAIN)
+    # Для всех пользователей, нажавших на "📊 Остатки", показываем остатки
+    await warehouse.cmd_stock(message, state)
 
 @dp.message(F.text == "📦 Мои заказы")
 async def button_my_orders(message: Message, state: FSMContext):
