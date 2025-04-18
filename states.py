@@ -64,15 +64,41 @@ class WarehouseStates(StatesGroup):
     waiting_for_glue_quantity = State()
     
 class SalesStates(StatesGroup):
+    # Базовые состояния для работы с пленкой
+    waiting_for_film = State()
     waiting_for_film_code = State()
-    waiting_for_panel_thickness = State()
+    waiting_for_film_name = State()
     waiting_for_panel_quantity = State()
+    
+    # Состояния для множественного выбора продуктов
+    selecting_products = State()
+    product_quantity = State()
+    add_more_products = State()
+    
+    # Состояния для множественного выбора стыков
+    selecting_joints = State()
+    joint_quantity = State()
+    add_more_joints = State()
     waiting_for_joint_type = State()
-    waiting_for_joint_color = State()
-    waiting_for_joint_thickness = State()
-    waiting_for_joint_quantity = State()
-    waiting_for_glue_quantity = State()
+    
+    # Общие состояния для заказа
+    waiting_for_need_joints = State()
+    waiting_for_need_glue = State()
     waiting_for_installation = State()
+    waiting_for_customer_name = State()
     waiting_for_customer_phone = State()
     waiting_for_delivery_address = State()
-    waiting_for_confirmation = State() 
+    waiting_for_confirmation = State()
+    
+    # Состояния для заказа с множественным выбором
+    waiting_for_order_joint_type = State()
+    waiting_for_order_joint_thickness = State()
+    waiting_for_order_joint_color = State()
+    waiting_for_order_joint_quantity = State()
+    waiting_for_order_glue_quantity = State()
+    waiting_for_order_installation = State()
+    waiting_for_order_customer_phone = State()
+    waiting_for_order_delivery_address = State()
+    waiting_for_order_confirmation = State()
+    waiting_for_order_film_color = State()
+    waiting_for_order_panel_quantity = State() 
