@@ -355,7 +355,7 @@ async def button_defect(message: Message, state: FSMContext):
 @dp.message(F.text == "📋 Заказы на производство")
 async def button_production_orders(message: Message, state: FSMContext):
     await state.set_state(MenuState.PRODUCTION_ORDERS)
-    await production.handle_production_orders(message, state)
+    await production_orders.handle_my_orders(message)
 
 @dp.message(F.text == "📦 Склад")
 async def button_warehouse(message: Message, state: FSMContext):
