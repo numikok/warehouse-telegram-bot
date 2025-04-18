@@ -475,7 +475,6 @@ async def process_reset_role(message: Message, state: FSMContext):
                 keyboard=[
                     [KeyboardButton(text="👤 Назначить роль")],
                     [KeyboardButton(text="📋 Список пользователей")],
-                    [KeyboardButton(text="❌ Удалить пользователя")],
                     [KeyboardButton(text="🔄 Сбросить роль пользователя")],
                     [KeyboardButton(text="◀️ Назад")]
                 ],
@@ -584,175 +583,6 @@ async def handle_next_page(message: Message, state: FSMContext):
     finally:
         db.close()
 
-@router.message(F.text == "❌ Удалить пользователя")
-async def handle_delete_user(message: Message, state: FSMContext):
-    db = next(get_db())
-    try:
-        user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
-        if user and user.role == UserRole.SUPER_ADMIN:
-            # Получаем список всех пользователей
-            users = db.query(User).all()
-            
-            if not users:
-                await message.answer("В системе нет пользователей.")
-                return
-                
-            # Формируем сообщение со списком пользователей
-            response = "Список пользователей для удаления:\n\n"
-            for u in users:
-                response += f"ID: {u.telegram_id}, Имя: {u.username}, Роль: {u.role.value}\n"
-                
-            await message.answer(
-                response + "\n\nВведите Telegram ID пользователя, которого хотите удалить:"
-            )
-            
-            await state.set_state(SuperAdminStates.waiting_for_user_to_delete)
-    finally:
-        db.close()
-
-@router.message(SuperAdminStates.waiting_for_user_to_delete)
-async def process_user_deletion(message: Message, state: FSMContext):
-    db = next(get_db())
-    try:
-        admin = db.query(User).filter(User.telegram_id == message.from_user.id).first()
-        if admin and admin.role == UserRole.SUPER_ADMIN:
-            try:
-                target_user_id = int(message.text)
-            except ValueError:
-                await message.answer("Пожалуйста, введите корректный Telegram ID.")
-                return
-            
-            # Проверяем, не пытается ли админ удалить самого себя
-            if target_user_id == admin.telegram_id:
-                await message.answer("⚠️ Невозможно удалить самого себя!")
-                await state.clear()
-                return
-            
-            # Проверяем, существует ли пользователь
-            target_user = db.query(User).filter(User.telegram_id == target_user_id).first()
-            if not target_user:
-                await message.answer("Пользователь не найден в системе.")
-                await state.clear()
-                return
-            
-            # Запрещаем удалять супер-админа
-            if target_user.role == UserRole.SUPER_ADMIN:
-                await message.answer("⚠️ Невозможно удалить пользователя с ролью супер-администратора.")
-                await state.clear()
-                return
-            
-            # Удаляем пользователя
-            db.delete(target_user)
-            db.commit()
-            
-            # Отправляем уведомление пользователю о удалении аккаунта
-            try:
-                await message.bot.send_message(
-                    chat_id=target_user_id,
-                    text="Ваш аккаунт был удален администратором системы.",
-                    reply_markup=ReplyKeyboardRemove()
-                )
-            except Exception as e:
-                logging.error(f"Не удалось отправить уведомление пользователю {target_user_id}: {str(e)}")
-            
-            keyboard = ReplyKeyboardMarkup(
-                keyboard=[
-                    [KeyboardButton(text="👤 Назначить роль")],
-                    [KeyboardButton(text="📋 Список пользователей")],
-                    [KeyboardButton(text="❌ Удалить пользователя")],
-                    [KeyboardButton(text="🔄 Сбросить роль пользователя")],
-                    [KeyboardButton(text="◀️ Назад")]
-                ],
-                resize_keyboard=True
-            )
-            
-            await message.answer(
-                f"Пользователь с ID {target_user_id} успешно удален из системы.",
-                reply_markup=keyboard
-            )
-            
-            await state.clear()
-    finally:
-        db.close()
-
-# Обработчики настроек системы
-@router.message(F.text == "🔔 Настройки уведомлений")
-async def handle_notification_settings(message: Message):
-    db = next(get_db())
-    try:
-        user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
-        if user and user.role == UserRole.SUPER_ADMIN:
-            await message.answer(
-                "Настройки уведомлений:\n\n"
-                "🔔 Уведомления о новых заказах: Включены\n"
-                "🔔 Уведомления о выполненных заказах: Включены\n"
-                "🔔 Уведомления о низком количестве материалов: Включены\n"
-                "🔔 Уведомления о производстве: Включены\n\n"
-                "Для изменения настроек уведомлений обратитесь к разработчику."
-            )
-    finally:
-        db.close()
-
-@router.message(F.text == "👥 Настройки ролей")
-async def handle_role_settings(message: Message):
-    db = next(get_db())
-    try:
-        user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
-        if user and user.role == UserRole.SUPER_ADMIN:
-            await message.answer(
-                "Настройки ролей:\n\n"
-                "👑 Супер-администратор: Полный доступ ко всем функциям\n"
-                "💼 Менеджер по продажам: Создание заказов, просмотр статистики\n"
-                "🏭 Производство: Управление производством, приход материалов\n"
-                "📦 Склад: Управление складом, подтверждение отгрузок\n\n"
-                "Для изменения настроек ролей используйте функцию 'Назначить роль'."
-            )
-    finally:
-        db.close()
-
-@router.message(F.text == "💾 Резервное копирование")
-async def handle_backup(message: Message):
-    db = next(get_db())
-    try:
-        user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
-        if user and user.role == UserRole.SUPER_ADMIN:
-            current_time = datetime.now()
-            
-            await message.answer(
-                "Резервное копирование:\n\n"
-                f"💾 Последнее резервное копирование: {current_time.strftime('%d.%m.%Y %H:%M')}\n"
-                "💾 Размер базы данных: ~2.5 МБ\n"
-                "💾 Статус: Активно\n\n"
-                "Для создания резервной копии обратитесь к разработчику."
-            )
-    finally:
-        db.close()
-
-@router.message(F.text == "📝 Логи системы")
-async def handle_system_logs(message: Message):
-    db = next(get_db())
-    try:
-        user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
-        if user and user.role == UserRole.SUPER_ADMIN:
-            current_time = datetime.now()
-            
-            # Создаем список из 10 временных меток с интервалом в 1 минуту
-            log_times = [current_time - timedelta(minutes=i) for i in range(9, -1, -1)]
-            
-            logs = [
-                f"{log_time.strftime('%d.%m.%Y %H:%M')} - Система активна, мониторинг работает"
-                for log_time in log_times
-            ]
-            
-            await message.answer(
-                "Логи системы:\n\n"
-                "📝 Последние 10 записей:\n" +
-                "\n".join(logs) +
-                "\n\nДля просмотра полных логов обратитесь к разработчику."
-            )
-    finally:
-        db.close()
-
 @router.message(F.text == "👤 Назначить роль")
 async def handle_assign_role(message: Message, state: FSMContext):
     db = next(get_db())
@@ -829,7 +659,6 @@ async def process_role_selection(message: Message, state: FSMContext):
                     keyboard=[
                         [KeyboardButton(text="👤 Назначить роль")],
                         [KeyboardButton(text="📋 Список пользователей")],
-                        [KeyboardButton(text="❌ Удалить пользователя")],
                         [KeyboardButton(text="🔄 Сбросить роль пользователя")],
                         [KeyboardButton(text="◀️ Назад")]
                     ],
@@ -879,7 +708,6 @@ async def process_role_selection(message: Message, state: FSMContext):
                     keyboard=[
                         [KeyboardButton(text="👤 Назначить роль")],
                         [KeyboardButton(text="📋 Список пользователей")],
-                        [KeyboardButton(text="❌ Удалить пользователя")],
                         [KeyboardButton(text="🔄 Сбросить роль пользователя")],
                         [KeyboardButton(text="◀️ Назад")]
                     ],

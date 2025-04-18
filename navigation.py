@@ -193,7 +193,6 @@ def get_menu_keyboard(menu_state: MenuState, is_admin_context: bool = False) -> 
         MenuState.SUPER_ADMIN_USERS: [
             [KeyboardButton(text="👤 Назначить роль")],
             [KeyboardButton(text="📋 Список пользователей")],
-            [KeyboardButton(text="❌ Удалить пользователя")],
             [KeyboardButton(text="🔄 Сбросить роль пользователя")],
             [KeyboardButton(text="◀️ Назад")]
         ],
