@@ -110,14 +110,6 @@ async def handle_materials_income(message: Message, state: FSMContext):
 async def handle_panel_defect(message: Message, state: FSMContext):
     logging.info("Специальный обработчик для брака панелей вызван")
     
-    # Проверяем, что мы действительно находимся в состоянии ожидания типа брака
-    current_state = await state.get_state()
-    logging.info(f"Текущее состояние: {current_state}")
-    
-    if current_state != "production_states:waiting_for_defect_type":
-        logging.warning(f"Вызов handle_panel_defect в неправильном состоянии: {current_state}")
-        return
-    
     # Запрашиваем толщину бракованных панелей
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
@@ -291,7 +283,6 @@ async def process_defect_panel_quantity(message: Message, state: FSMContext):
         await message.answer("Пожалуйста, введите целое число.")
         return
     
-    logging.info("Сбрасываю состояние")
     await state.clear()
 
 @router.message(ProductionStates.waiting_for_defect_film_color)
@@ -434,7 +425,6 @@ async def process_defect_film_meters(message: Message, state: FSMContext):
         await message.answer("Пожалуйста, введите корректное число.")
         return
     
-    logging.info("Сбрасываю состояние")
     await state.clear()
 
 @router.message(ProductionStates.waiting_for_film_quantity)
@@ -1139,14 +1129,6 @@ async def process_film_code(message: Message, state: FSMContext):
 async def handle_film_defect(message: Message, state: FSMContext):
     logging.info("Специальный обработчик для брака пленки вызван")
     
-    # Проверяем, что мы действительно находимся в состоянии ожидания типа брака
-    current_state = await state.get_state()
-    logging.info(f"Текущее состояние при обработке брака пленки: {current_state}")
-    
-    if current_state != ProductionStates.waiting_for_defect_type:
-        logging.warning(f"Вызов handle_film_defect в неправильном состоянии: {current_state}")
-        return
-    
     db = next(get_db())
     try:
         # Получаем список всех цветов пленки
@@ -1190,19 +1172,37 @@ async def handle_defect(message: Message, state: FSMContext):
     
     # Сбрасываем любые предыдущие данные в состоянии, которые могли остаться
     await state.clear()
+    logging.info("Состояние очищено")
     
-    logging.info("Устанавливаю состояние ожидания типа брака")
+    # Логируем состояние перед установкой
+    previous_state = await state.get_state()
+    logging.info(f"Предыдущее состояние: {previous_state}")
+    
     # Устанавливаем состояние ожидания выбора типа брака
     await state.set_state(ProductionStates.waiting_for_defect_type)
+    
+    # Проверяем, что состояние действительно установилось
+    current_state = await state.get_state()
+    logging.info(f"Установлено состояние: {current_state}")
     
     # Формируем клавиатуру для выбора типа брака
     keyboard = get_menu_keyboard(MenuState.PRODUCTION_DEFECT)
     logging.info(f"Сформирована клавиатура: {keyboard}")
     
+    # Создаем дамп данных клавиатуры для отладки
+    keyboard_data = []
+    for row in keyboard.keyboard:
+        keyboard_row = []
+        for button in row:
+            keyboard_row.append(button.text)
+        keyboard_data.append(keyboard_row)
+    logging.info(f"Кнопки клавиатуры: {keyboard_data}")
+    
     await message.answer(
         "Выберите тип брака:",
         reply_markup=keyboard
     )
+    logging.info("Отправлено сообщение с запросом типа брака")
 
 # Обработчик для панелей в меню материалов
 @router.message(F.text == "🪵 Панель")
@@ -1238,3 +1238,319 @@ async def handle_panel(message: Message, state: FSMContext):
     
     await state.set_state(ProductionStates.waiting_for_panel_thickness)
     logging.info(f"Установлено состояние waiting_for_panel_thickness")
+
+@router.message(ProductionStates.waiting_for_defect_type, F.text == "⚙️ Стык")
+async def handle_joint_defect(message: Message, state: FSMContext):
+    logging.info("Специальный обработчик для брака стыков вызван")
+    
+    # Запрашиваем тип бракованных стыков
+    await state.update_data(defect_type="joint_defect")
+    await state.set_state(ProductionStates.waiting_for_defect_joint_type)
+    
+    await message.answer(
+        "Выберите тип бракованных стыков:",
+        reply_markup=get_joint_type_keyboard()
+    )
+    logging.info("Установлено состояние: waiting_for_defect_joint_type")
+
+@router.message(ProductionStates.waiting_for_defect_type, F.text == "🧴 Клей")
+async def handle_glue_defect(message: Message, state: FSMContext):
+    logging.info("Специальный обработчик для брака клея вызван")
+    
+    # Сразу запрашиваем количество бракованного клея
+    await state.update_data(defect_type="glue_defect")
+    await state.set_state(ProductionStates.waiting_for_defect_glue_quantity)
+    
+    await message.answer(
+        "Введите количество бракованного клея (в штуках):",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="◀️ Назад")]],
+            resize_keyboard=True
+        )
+    )
+    logging.info("Установлено состояние: waiting_for_defect_glue_quantity")
+
+# Обработчик для количества бракованного клея
+@router.message(ProductionStates.waiting_for_defect_glue_quantity)
+async def process_defect_glue_quantity(message: Message, state: FSMContext):
+    logging.info(f"Обработка количества бракованного клея: '{message.text}'")
+    
+    if message.text == "◀️ Назад":
+        logging.info("Пользователь нажал Назад")
+        await handle_defect(message, state)
+        return
+    
+    try:
+        quantity = int(message.text.strip())
+        if quantity <= 0:
+            await message.answer("Количество должно быть положительным числом.")
+            return
+        
+        db = next(get_db())
+        try:
+            # Получаем текущее количество клея
+            glue = db.query(Glue).first()
+            if not glue:
+                await message.answer(
+                    "В системе не зарегистрирован клей. Сначала добавьте клей через меню 'Приход сырья'.",
+                    reply_markup=get_menu_keyboard(MenuState.PRODUCTION_MAIN)
+                )
+                return
+            
+            # Проверяем достаточность клея
+            if glue.quantity < quantity:
+                await message.answer(
+                    f"Невозможно списать {quantity} шт. клея, доступно только {glue.quantity} шт."
+                )
+                return
+            
+            # Получаем пользователя из базы данных
+            user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
+            
+            # Уменьшаем количество клея
+            previous_quantity = glue.quantity
+            glue.quantity -= quantity
+            
+            # Создаем запись операции
+            operation = Operation(
+                user_id=user.id,
+                operation_type="glue_defect",
+                quantity=quantity,
+                details=json.dumps({
+                    "previous_quantity": previous_quantity,
+                    "new_quantity": glue.quantity,
+                    "is_defect": True
+                })
+            )
+            
+            db.add(operation)
+            db.commit()
+            
+            await message.answer(
+                f"✅ Списано {quantity} шт. бракованного клея\n"
+                f"Остаток: {glue.quantity} шт.",
+                reply_markup=get_menu_keyboard(MenuState.PRODUCTION_MAIN)
+            )
+            
+        finally:
+            db.close()
+            
+    except ValueError:
+        await message.answer("Пожалуйста, введите корректное число.")
+        return
+    
+    await state.clear()
+
+# Обработчик для типа бракованных стыков
+@router.message(ProductionStates.waiting_for_defect_joint_type)
+async def process_defect_joint_type(message: Message, state: FSMContext):
+    # Маппинг русских названий на значения enum
+    joint_type_mapping = {
+        "Бабочка": JointType.BUTTERFLY,
+        "Простой": JointType.SIMPLE,
+        "Замыкающий": JointType.CLOSING
+    }
+    
+    if message.text == "◀️ Назад":
+        await handle_defect(message, state)
+        return
+    
+    if message.text not in ["Бабочка", "Простой", "Замыкающий"]:
+        await message.answer("Пожалуйста, выберите тип стыка из предложенных вариантов.")
+        return
+    
+    # Сохраняем тип стыка
+    await state.update_data(defect_joint_type=joint_type_mapping[message.text])
+    
+    # Запрашиваем цвет стыка
+    await message.answer(
+        "Введите цвет бракованных стыков:",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="◀️ Назад")]],
+            resize_keyboard=True
+        )
+    )
+    await state.set_state(ProductionStates.waiting_for_defect_joint_color)
+
+# Обработчик для цвета бракованных стыков
+@router.message(ProductionStates.waiting_for_defect_joint_color)
+async def process_defect_joint_color(message: Message, state: FSMContext):
+    if message.text == "◀️ Назад":
+        await message.answer(
+            "Выберите тип бракованных стыков:",
+            reply_markup=get_joint_type_keyboard()
+        )
+        await state.set_state(ProductionStates.waiting_for_defect_joint_type)
+        return
+    
+    # Сохраняем цвет стыка
+    await state.update_data(defect_joint_color=message.text)
+    
+    # Запрашиваем толщину стыка
+    await message.answer(
+        "Выберите толщину бракованных стыков:",
+        reply_markup=get_joint_thickness_keyboard()
+    )
+    await state.set_state(ProductionStates.waiting_for_defect_joint_thickness)
+
+# Обработчик для толщины бракованных стыков
+@router.message(ProductionStates.waiting_for_defect_joint_thickness)
+async def process_defect_joint_thickness(message: Message, state: FSMContext):
+    if message.text == "◀️ Назад":
+        await message.answer(
+            "Введите цвет бракованных стыков:",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="◀️ Назад")]],
+                resize_keyboard=True
+            )
+        )
+        await state.set_state(ProductionStates.waiting_for_defect_joint_color)
+        return
+    
+    if message.text not in ["0.5", "0.8"]:
+        await message.answer("Пожалуйста, выберите толщину из предложенных вариантов.")
+        return
+    
+    # Сохраняем толщину стыка
+    await state.update_data(defect_joint_thickness=float(message.text))
+    
+    # Запрашиваем количество стыков
+    await message.answer(
+        "Введите количество бракованных стыков:",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="◀️ Назад")]],
+            resize_keyboard=True
+        )
+    )
+    await state.set_state(ProductionStates.waiting_for_defect_joint_quantity)
+
+# Обработчик для количества бракованных стыков
+@router.message(ProductionStates.waiting_for_defect_joint_quantity)
+async def process_defect_joint_quantity(message: Message, state: FSMContext):
+    if message.text == "◀️ Назад":
+        await message.answer(
+            "Выберите толщину бракованных стыков:",
+            reply_markup=get_joint_thickness_keyboard()
+        )
+        await state.set_state(ProductionStates.waiting_for_defect_joint_thickness)
+        return
+    
+    try:
+        quantity = int(message.text.strip())
+        if quantity <= 0:
+            await message.answer("Количество должно быть положительным числом.")
+            return
+        
+        # Получаем данные состояния
+        data = await state.get_data()
+        
+        db = next(get_db())
+        try:
+            # Получаем стык с заданными параметрами
+            joint = db.query(Joint).filter(
+                Joint.type == data["defect_joint_type"],
+                Joint.color == data["defect_joint_color"],
+                Joint.thickness == data["defect_joint_thickness"]
+            ).first()
+            
+            if not joint:
+                await message.answer(
+                    "Стык с такими параметрами не найден в базе данных. Сначала добавьте такой стык через меню 'Приход сырья'.",
+                    reply_markup=get_menu_keyboard(MenuState.PRODUCTION_MAIN)
+                )
+                return
+            
+            # Проверяем достаточность стыков
+            if joint.quantity < quantity:
+                await message.answer(
+                    f"Невозможно списать {quantity} шт. стыков, доступно только {joint.quantity} шт."
+                )
+                return
+            
+            # Получаем пользователя из базы данных
+            user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
+            
+            # Получаем русское название типа стыка для отображения
+            joint_type_names = {
+                "butterfly": "Бабочка",
+                "simple": "Простой",
+                "closing": "Замыкающий"
+            }
+            joint_type_name = joint_type_names.get(data["defect_joint_type"].value, data["defect_joint_type"].value)
+            
+            # Уменьшаем количество стыков
+            previous_quantity = joint.quantity
+            joint.quantity -= quantity
+            
+            # Создаем запись операции
+            operation = Operation(
+                user_id=user.id,
+                operation_type="joint_defect",
+                quantity=quantity,
+                details=json.dumps({
+                    "joint_type": data["defect_joint_type"].value,
+                    "joint_color": data["defect_joint_color"],
+                    "joint_thickness": data["defect_joint_thickness"],
+                    "previous_quantity": previous_quantity,
+                    "new_quantity": joint.quantity,
+                    "is_defect": True
+                })
+            )
+            
+            db.add(operation)
+            db.commit()
+            
+            await message.answer(
+                f"✅ Списано {quantity} шт. бракованных стыков\n"
+                f"Тип: {joint_type_name}\n"
+                f"Цвет: {data['defect_joint_color']}\n"
+                f"Толщина: {data['defect_joint_thickness']} мм\n"
+                f"Остаток: {joint.quantity} шт.",
+                reply_markup=get_menu_keyboard(MenuState.PRODUCTION_MAIN)
+            )
+            
+        finally:
+            db.close()
+            
+    except ValueError:
+        await message.answer("Пожалуйста, введите корректное число.")
+        return
+    
+    await state.clear()
+
+# Отладочный обработчик для всех сообщений в состоянии waiting_for_defect_type
+# Этот обработчик должен быть ПОСЛЕДНИМ в файле
+@router.message(ProductionStates.waiting_for_defect_type)
+async def debug_defect_type_handler(message: Message, state: FSMContext):
+    logging.info(f"Получено сообщение в состоянии waiting_for_defect_type: '{message.text}'")
+    logging.info(f"Текущее состояние: {await state.get_state()}")
+    
+    # Дамп полной информации о сообщении для отладки
+    try:
+        message_dict = {
+            "message_id": message.message_id,
+            "text": message.text,
+            "chat_id": message.chat.id,
+            "from_id": message.from_user.id if message.from_user else None,
+            "content_type": message.content_type
+        }
+        logging.info(f"Полная информация о сообщении: {message_dict}")
+    except Exception as e:
+        logging.error(f"Ошибка при дампе сообщения: {e}")
+    
+    # Проверяем, соответствует ли сообщение какому-то из ожидаемых типов брака
+    if message.text == "🪵 Панель":
+        logging.info("Обнаружена кнопка 'Панель', вызываем обработчик вручную")
+        await handle_panel_defect(message, state)
+    elif message.text == "🎨 Пленка":
+        logging.info("Обнаружена кнопка 'Пленка', вызываем обработчик вручную")
+        await handle_film_defect(message, state)
+    elif message.text == "⚙️ Стык":
+        logging.info("Обнаружена кнопка 'Стык', вызываем обработчик вручную")
+        await handle_joint_defect(message, state)
+    elif message.text == "🧴 Клей":
+        logging.info("Обнаружена кнопка 'Клей', вызываем обработчик вручную")
+        await handle_glue_defect(message, state)
+    else:
+        logging.info(f"Неизвестная кнопка: '{message.text}'")
+        await message.answer("Пожалуйста, выберите тип брака из предложенных вариантов.")
