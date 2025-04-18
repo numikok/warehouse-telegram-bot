@@ -458,6 +458,141 @@ async def process_add_more_products(message: Message, state: FSMContext):
             )
         )
 
+@router.message(SalesStates.waiting_for_need_joints)
+async def process_need_joints(message: Message, state: FSMContext):
+    """Обработка ответа на вопрос о необходимости стыков"""
+    response = message.text.strip()
+    
+    if response == "✅ Да":
+        # Пользователь хочет стыки
+        await state.update_data(need_joints=True)
+        
+        # Получаем доступные стыки из базы данных
+        db = next(get_db())
+        try:
+            # Группируем стыки по типу и показываем количество
+            butterfly_joints = db.query(Joint).filter(Joint.type == JointType.BUTTERFLY, Joint.quantity > 0).all()
+            simple_joints = db.query(Joint).filter(Joint.type == JointType.SIMPLE, Joint.quantity > 0).all()
+            closing_joints = db.query(Joint).filter(Joint.type == JointType.CLOSING, Joint.quantity > 0).all()
+            
+            # Формируем сообщение о доступных стыках
+            joints_info = "Доступные стыки:\n\n"
+            
+            if butterfly_joints:
+                joints_info += "🦋 Бабочка:\n"
+                for thickness in [0.5, 0.8]:
+                    thickness_joints = [j for j in butterfly_joints if j.thickness == thickness]
+                    if thickness_joints:
+                        joints_info += f"  {thickness} мм: "
+                        joints_info += ", ".join([f"{j.color} ({j.quantity} шт.)" for j in thickness_joints])
+                        joints_info += "\n"
+            
+            if simple_joints:
+                joints_info += "🔄 Простые:\n"
+                for thickness in [0.5, 0.8]:
+                    thickness_joints = [j for j in simple_joints if j.thickness == thickness]
+                    if thickness_joints:
+                        joints_info += f"  {thickness} мм: "
+                        joints_info += ", ".join([f"{j.color} ({j.quantity} шт.)" for j in thickness_joints])
+                        joints_info += "\n"
+            
+            if closing_joints:
+                joints_info += "🔒 Замыкающие:\n"
+                for thickness in [0.5, 0.8]:
+                    thickness_joints = [j for j in closing_joints if j.thickness == thickness]
+                    if thickness_joints:
+                        joints_info += f"  {thickness} мм: "
+                        joints_info += ", ".join([f"{j.color} ({j.quantity} шт.)" for j in thickness_joints])
+                        joints_info += "\n"
+            
+            if not butterfly_joints and not simple_joints and not closing_joints:
+                # Если нет стыков, сообщаем об этом и переходим к следующему шагу
+                await message.answer("К сожалению, на складе нет доступных стыков.")
+                await state.update_data(need_joints=False)
+                
+                # Переходим к запросу о клее
+                keyboard = ReplyKeyboardMarkup(
+                    keyboard=[
+                        [KeyboardButton(text="✅ Да"), KeyboardButton(text="❌ Нет")],
+                        [KeyboardButton(text="◀️ Назад")]
+                    ],
+                    resize_keyboard=True
+                )
+                await message.answer(
+                    "Требуется ли клей?",
+                    reply_markup=keyboard
+                )
+                await state.set_state(SalesStates.waiting_for_need_glue)
+                return
+            
+            # Запрашиваем тип стыка
+            keyboard = ReplyKeyboardMarkup(
+                keyboard=[
+                    [KeyboardButton(text="🦋 Бабочка")] if butterfly_joints else [],
+                    [KeyboardButton(text="🔄 Простые")] if simple_joints else [],
+                    [KeyboardButton(text="🔒 Замыкающие")] if closing_joints else [],
+                    [KeyboardButton(text="◀️ Назад")]
+                ],
+                resize_keyboard=True
+            )
+            
+            await message.answer(
+                joints_info + "\n\nВыберите тип стыка:",
+                reply_markup=keyboard
+            )
+            await state.set_state(SalesStates.waiting_for_order_joint_type)
+        finally:
+            db.close()
+    elif response == "❌ Нет":
+        # Пользователь не хочет стыки
+        await state.update_data(need_joints=False)
+        
+        # Переходим к запросу о клее
+        keyboard = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="✅ Да"), KeyboardButton(text="❌ Нет")],
+                [KeyboardButton(text="◀️ Назад")]
+            ],
+            resize_keyboard=True
+        )
+        await message.answer(
+            "Требуется ли клей?",
+            reply_markup=keyboard
+        )
+        await state.set_state(SalesStates.waiting_for_need_glue)
+    elif response == "◀️ Назад":
+        # Возвращаемся к вопросу о добавлении продуктов
+        data = await state.get_data()
+        selected_products = data.get('selected_products', [])
+        
+        # Формируем список выбранных продуктов
+        products_info = "Выбранные продукты:\n"
+        for product in selected_products:
+            products_info += f"▪️ {product['film_code']} (толщина {product['thickness']} мм): {product['quantity']} шт.\n"
+        
+        await message.answer(
+            f"{products_info}\n\nХотите добавить еще продукцию в заказ?",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[
+                    [KeyboardButton(text="✅ Да"), KeyboardButton(text="❌ Нет")],
+                    [KeyboardButton(text="◀️ Назад")]
+                ],
+                resize_keyboard=True
+            )
+        )
+        await state.set_state(SalesStates.add_more_products)
+    else:
+        await message.answer(
+            "Пожалуйста, выберите один из вариантов: ✅ Да, ❌ Нет или ◀️ Назад",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[
+                    [KeyboardButton(text="✅ Да"), KeyboardButton(text="❌ Нет")],
+                    [KeyboardButton(text="◀️ Назад")]
+                ],
+                resize_keyboard=True
+            )
+        )
+
 @router.message(F.text == "📝 Заказать производство")
 async def handle_production_order(message: Message, state: FSMContext):
     if not await check_sales_access(message):
