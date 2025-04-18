@@ -322,4 +322,21 @@ def get_film_thickness_keyboard():
     return keyboard
 
 async def get_role_menu_keyboard(menu_state: MenuState, message: Message, state: FSMContext) -> ReplyKeyboardMarkup:
-    # ... existing code ... 
+    """Получает клавиатуру меню, учитывая роль пользователя и контекст админа"""
+    db = next(get_db())
+    try:
+        user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
+        if not user:
+            return get_menu_keyboard(menu_state)
+            
+        # Получаем флаг админ-контекста
+        state_data = await state.get_data()
+        is_admin_context = state_data.get("is_admin_context", False)
+        
+        # Применяем флаг контекста админа для меню
+        if user.role == UserRole.SUPER_ADMIN and is_admin_context:
+            return get_menu_keyboard(menu_state, is_admin_context=True)
+        else:
+            return get_menu_keyboard(menu_state)
+    finally:
+        db.close() 
