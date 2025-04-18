@@ -117,6 +117,7 @@ class ProductionOrder(Base):
     manager_id = Column(Integer, ForeignKey('users.id'), nullable=False)
     panel_quantity = Column(Integer, nullable=False)
     film_color = Column(String, nullable=False)
+    panel_thickness = Column(Float, nullable=False, default=0.5)  # Толщина панели (0.5 или 0.8)
     status = Column(String, default="new")  # new, in_progress, completed
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     completed_at = Column(DateTime(timezone=True), nullable=True)

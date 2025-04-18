@@ -7,14 +7,16 @@ from models import User, UserRole, ProductionOrder, Film, Panel, FinishedProduct
 from database import get_db
 import logging
 from datetime import datetime
+from navigation import MenuState, get_menu_keyboard
 
 router = Router()
 
 class ProductionOrderStates(StatesGroup):
+    waiting_for_panel_thickness = State()
     waiting_for_panel_quantity = State()
     waiting_for_film_color = State()
 
-async def notify_production_users(bot, order_id: int, panel_quantity: int, film_color: str):
+async def notify_production_users(bot, order_id: int, panel_quantity: int, panel_thickness: float, film_color: str):
     """Уведомляет всех пользователей с ролью PRODUCTION о новом заказе."""
     db = next(get_db())
     try:
@@ -24,6 +26,7 @@ async def notify_production_users(bot, order_id: int, panel_quantity: int, film_
             await bot.send_message(
                 user.telegram_id,
                 f"📢 Новый заказ на производство #{order_id}!\n"
+                f"Толщина панелей: {panel_thickness} мм\n"
                 f"Количество панелей: {panel_quantity}\n"
                 f"Цвет пленки: {film_color}"
             )
@@ -39,6 +42,39 @@ async def handle_production_order(message: Message, state: FSMContext):
             await message.answer("У вас нет прав для создания заказов на производство.")
             return
             
+        # Запрашиваем толщину панелей для заказа
+        keyboard = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="0.5")],
+                [KeyboardButton(text="0.8")],
+                [KeyboardButton(text="◀️ Назад")]
+            ],
+            resize_keyboard=True
+        )
+        
+        await message.answer(
+            "Выберите толщину панелей для заказа (мм):",
+            reply_markup=keyboard
+        )
+        await state.set_state(ProductionOrderStates.waiting_for_panel_thickness)
+    finally:
+        db.close()
+
+@router.message(ProductionOrderStates.waiting_for_panel_thickness)
+async def process_panel_thickness(message: Message, state: FSMContext):
+    if message.text == "◀️ Назад":
+        # Возвращаемся к главному меню
+        await state.clear()
+        return
+    
+    try:
+        thickness = float(message.text)
+        if thickness not in [0.5, 0.8]:
+            await message.answer("Пожалуйста, выберите толщину 0.5 или 0.8 мм.")
+            return
+            
+        await state.update_data(panel_thickness=thickness)
+        
         await message.answer(
             "Введите количество панелей:",
             reply_markup=ReplyKeyboardMarkup(
@@ -47,14 +83,27 @@ async def handle_production_order(message: Message, state: FSMContext):
             )
         )
         await state.set_state(ProductionOrderStates.waiting_for_panel_quantity)
-    finally:
-        db.close()
+    except ValueError:
+        await message.answer("Пожалуйста, введите корректное число (0.5 или 0.8).")
 
 @router.message(ProductionOrderStates.waiting_for_panel_quantity)
 async def process_panel_quantity(message: Message, state: FSMContext):
     if message.text == "◀️ Назад":
-        # Возвращаемся к главному меню
-        await state.clear()
+        # Возвращаемся к выбору толщины панели
+        keyboard = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="0.5")],
+                [KeyboardButton(text="0.8")],
+                [KeyboardButton(text="◀️ Назад")]
+            ],
+            resize_keyboard=True
+        )
+        
+        await message.answer(
+            "Выберите толщину панелей для заказа (мм):",
+            reply_markup=keyboard
+        )
+        await state.set_state(ProductionOrderStates.waiting_for_panel_thickness)
         return
         
     try:
@@ -108,6 +157,7 @@ async def process_film_color(message: Message, state: FSMContext):
         order = ProductionOrder(
             manager_id=user.id,
             panel_quantity=data["panel_quantity"],
+            panel_thickness=data["panel_thickness"],
             film_color=message.text,
             status="new"
         )
@@ -119,12 +169,14 @@ async def process_film_color(message: Message, state: FSMContext):
             message.bot,
             order.id,
             data["panel_quantity"],
+            data["panel_thickness"],
             message.text
         )
         
         await message.answer(
             f"✅ Заказ на производство создан!\n"
             f"Номер заказа: #{order.id}\n"
+            f"Толщина панелей: {data['panel_thickness']} мм\n"
             f"Количество панелей: {data['panel_quantity']}\n"
             f"Цвет пленки: {message.text}"
         )
@@ -134,7 +186,7 @@ async def process_film_color(message: Message, state: FSMContext):
     await state.clear()
 
 @router.message(F.text == "📋 Мои заказы")
-async def handle_my_orders(message: Message):
+async def handle_my_orders(message: Message, state: FSMContext):
     db = next(get_db())
     try:
         user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
@@ -163,6 +215,7 @@ async def handle_my_orders(message: Message):
             status = "🆕 Новый" if order.status == OrderStatus.NEW else "🔄 В работе"
             message_text += (
                 f"Заказ #{order.id} ({status})\n"
+                f"Толщина панелей: {order.panel_thickness} мм\n"
                 f"Количество панелей: {order.panel_quantity}\n"
                 f"Цвет пленки: {order.film_color}\n"
                 f"Создан: {order.created_at.strftime('%d.%m.%Y %H:%M')}\n\n"
@@ -176,7 +229,7 @@ async def handle_my_orders(message: Message):
         db.close()
 
 @router.message(F.text.startswith("✅ Заказ #"))
-async def handle_order_completed(message: Message):
+async def handle_order_completed(message: Message, state: FSMContext):
     try:
         order_id = int(message.text.split("#")[1].split()[0])
     except (IndexError, ValueError):
@@ -274,11 +327,12 @@ async def handle_order_completed(message: Message):
         await message.answer(
             f"✅ Заказ #{order.id} помечен как выполненный.\n"
             f"• Использовано пустых панелей: {order.panel_quantity}\n"
+            f"• Толщина панелей: {order.panel_thickness} мм\n"
             f"• Использовано пленки {order.film_color}: {meters_used:.2f} м\n"
             f"• Добавлено готовых панелей с пленкой {order.film_color}: {order.panel_quantity}"
         )
         
         # Показываем обновленный список заказов без выполненного заказа
-        await handle_my_orders(message)
+        await handle_my_orders(message, state)
     finally:
         db.close() 
