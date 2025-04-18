@@ -165,7 +165,8 @@ async def process_defect_panel_thickness(message: Message, state: FSMContext):
         db = next(get_db())
         try:
             # Получаем текущий остаток панелей с указанной толщиной
-            panel = db.query(Panel).filter(Panel.panel_thickness == thickness).first()
+            panel = db.query(Panel).filter(Panel.thickness == thickness).first()
+            
             if not panel or panel.quantity <= 0:
                 logging.warning(f"В базе нет панелей толщиной {thickness} мм")
                 await message.answer(
@@ -234,7 +235,9 @@ async def process_defect_panel_quantity(message: Message, state: FSMContext):
             
         db = next(get_db())
         try:
-            panel = db.query(Panel).filter(Panel.panel_thickness == panel_thickness).first()
+            # Ищем панель по толщине
+            panel = db.query(Panel).filter(Panel.thickness == panel_thickness).first()
+            
             if not panel:
                 logging.warning(f"В базе не найдены панели толщиной {panel_thickness} мм")
                 await message.answer(f"В базе нет панелей толщиной {panel_thickness} мм.")
@@ -980,11 +983,14 @@ async def process_panel_quantity(message: Message, state: FSMContext):
             user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
             
             # Получаем текущий запас панелей с указанной толщиной
-            panel = db.query(Panel).filter(Panel.panel_thickness == panel_thickness).first()
+            panel = db.query(Panel).filter(Panel.thickness == panel_thickness).first()
             
             if not panel:
                 # Если записи о панелях с такой толщиной еще нет, создаем ее
-                panel = Panel(quantity=quantity, panel_thickness=panel_thickness)
+                panel = Panel(
+                    quantity=quantity, 
+                    thickness=panel_thickness
+                )
                 db.add(panel)
                 previous_quantity = 0
             else:
