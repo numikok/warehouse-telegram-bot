@@ -354,6 +354,16 @@ async def button_defect(message: Message, state: FSMContext):
 
 @dp.message(F.text == "📋 Заказы на производство")
 async def button_production_orders(message: Message, state: FSMContext):
+    logging.info(f"Нажата кнопка 'Заказы на производство' пользователем {message.from_user.id}")
+    
+    # Проверяем текущую роль пользователя
+    db = next(get_db())
+    try:
+        user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
+        logging.info(f"Пользователь {message.from_user.id} имеет роль {user.role if user else 'None'}")
+    finally:
+        db.close()
+    
     await state.set_state(MenuState.PRODUCTION_ORDERS)
     await production_orders.handle_my_orders(message, state)
 

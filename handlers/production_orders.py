@@ -190,7 +190,10 @@ async def handle_my_orders(message: Message, state: FSMContext):
     db = next(get_db())
     try:
         user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
-        if not user or user.role != UserRole.PRODUCTION:
+        
+        # Проверяем, имеет ли пользователь нужную роль (либо производство, либо супер-админ)
+        if not user or (user.role != UserRole.PRODUCTION and user.role != UserRole.SUPER_ADMIN):
+            logging.info(f"Отказ в доступе для пользователя {message.from_user.id} с ролью {user.role if user else 'None'}")
             await message.answer("У вас нет прав для просмотра заказов на производство.")
             return
             
