@@ -8,6 +8,7 @@ from database import get_db
 import json
 import logging
 from navigation import MenuState, get_menu_keyboard, go_back
+import re
 
 router = Router()
 
@@ -559,7 +560,7 @@ async def process_need_joints(message: Message, state: FSMContext):
             "Требуется ли клей?",
             reply_markup=keyboard
         )
-        await state.set_state(SalesStates.waiting_for_need_glue)
+        await state.set_state(SalesStates.waiting_for_order_installation)
     elif response == "◀️ Назад":
         # Возвращаемся к вопросу о добавлении продуктов
         data = await state.get_data()
@@ -1060,7 +1061,7 @@ async def process_add_more_joints(message: Message, state: FSMContext):
             "Требуется ли клей?",
             reply_markup=keyboard
         )
-        await state.set_state(SalesStates.waiting_for_need_glue)
+        await state.set_state(SalesStates.waiting_for_order_installation)
     elif response == "◀️ Назад":
         # Возвращаемся к вводу количества стыков
         data = await state.get_data()
@@ -1353,38 +1354,52 @@ async def process_order_delivery_address(message: Message, state: FSMContext):
     # Показываем сводку заказа и запрашиваем подтверждение
     data = await state.get_data()
     
-    film_code = data.get('film_code', '')
-    panel_quantity = data.get('panel_quantity', 0)
+    # Получаем данные о выбранных продуктах
+    selected_products = data.get('selected_products', [])
+    
+    # Получаем данные о выбранных стыках
+    selected_joints = data.get('selected_joints', [])
+    
     need_joints = data.get('need_joints', False)
-    joint_type = data.get('joint_type', '')
-    joint_thickness = data.get('joint_thickness', 0)
-    joint_color = data.get('joint_color', '')
-    joint_quantity = data.get('joint_quantity', 0)
+    need_glue = data.get('need_glue', False)
     glue_quantity = data.get('glue_quantity', 0)
     installation_required = data.get('installation_required', False)
     customer_phone = data.get('customer_phone', '')
     delivery_address = data.get('delivery_address', '')
     
-    # Преобразуем тип стыка из enum в текст
-    joint_type_text = ""
-    if joint_type:
-        if joint_type == JointType.BUTTERFLY.value:
-            joint_type_text = "Бабочка"
-        elif joint_type == JointType.SIMPLE.value:
-            joint_type_text = "Простые"
-        elif joint_type == JointType.CLOSING.value:
-            joint_type_text = "Замыкающие"
-    
     # Формируем текст заказа
     order_summary = f"📝 Сводка заказа:\n\n"
-    order_summary += f"🎨 Цвет пленки: {film_code}\n"
-    order_summary += f"📏 Количество панелей: {panel_quantity} шт.\n"
     
-    if need_joints:
-        order_summary += f"🔗 Стыки: {joint_type_text}, {joint_thickness} мм, {joint_color}, {joint_quantity} шт.\n"
+    # Добавляем информацию о выбранных продуктах
+    if selected_products:
+        order_summary += f"📦 Выбранные продукты:\n"
+        total_panels = 0
+        for product in selected_products:
+            order_summary += f"▪️ {product['film_code']} (толщина {product['thickness']} мм): {product['quantity']} шт.\n"
+            total_panels += product['quantity']
+        order_summary += f"Всего панелей: {total_panels} шт.\n\n"
     else:
-        order_summary += f"🔗 Стыки: Нет\n"
+        order_summary += "Продукты не выбраны\n\n"
     
+    # Добавляем информацию о стыках
+    if need_joints and selected_joints:
+        order_summary += f"🔗 Стыки:\n"
+        for joint in selected_joints:
+            joint_type = joint.get('joint_type', '')
+            joint_type_text = ''
+            if joint_type == 'butterfly':
+                joint_type_text = 'Бабочка'
+            elif joint_type == 'simple':
+                joint_type_text = 'Простой'
+            elif joint_type == 'closing':
+                joint_type_text = 'Замыкающий'
+            
+            order_summary += f"▪️ {joint_type_text}, {joint.get('thickness', '')} мм, {joint.get('color', '')}: {joint.get('quantity', 0)} шт.\n"
+        order_summary += "\n"
+    else:
+        order_summary += f"🔗 Стыки: Нет\n\n"
+    
+    # Добавляем остальную информацию
     order_summary += f"🧴 Клей: {glue_quantity} тюбиков\n"
     order_summary += f"🔧 Монтаж: {'Требуется' if installation_required else 'Не требуется'}\n"
     order_summary += f"📞 Контактный телефон: {customer_phone}\n"
