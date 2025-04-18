@@ -24,6 +24,9 @@ class OperationType(enum.Enum):
     PRODUCTION = "PRODUCTION"
     SALE = "SALE"
     WAREHOUSE = "WAREHOUSE"
+    READY_PRODUCT_OUT = "READY_PRODUCT_OUT"  # Отпуск готовой продукции
+    JOINT_OUT = "JOINT_OUT"  # Отпуск стыков
+    GLUE_OUT = "GLUE_OUT"  # Отпуск клея
 
 class User(Base):
     __tablename__ = "users"
@@ -129,18 +132,64 @@ class OrderStatus(enum.Enum):
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     CANCELLED = "cancelled"
+    CREATED = "created"
+
+class OrderFilm(Base):
+    __tablename__ = "order_films"
+    
+    id = Column(Integer, primary_key=True)
+    order_id = Column(Integer, ForeignKey('orders.id', ondelete='CASCADE'), nullable=False)
+    film_code = Column(String, nullable=False)
+    quantity = Column(Integer, nullable=False)
+    
+    order = relationship("Order", back_populates="films")
+
+class OrderProduct(Base):
+    __tablename__ = "order_products"
+    
+    id = Column(Integer, primary_key=True)
+    order_id = Column(Integer, ForeignKey('orders.id', ondelete='CASCADE'), nullable=False)
+    film_id = Column(Integer, ForeignKey('films.id'), nullable=False)
+    thickness = Column(Float, nullable=False, default=0.5)  # Толщина панели (0.5 или 0.8)
+    quantity = Column(Integer, nullable=False)
+    is_finished = Column(Boolean, default=True)  # Является ли готовой продукцией или требует производства
+    
+    order = relationship("Order", back_populates="products")
+    film = relationship("Film")
+
+class OrderJoint(Base):
+    __tablename__ = "order_joints"
+    
+    id = Column(Integer, primary_key=True)
+    order_id = Column(Integer, ForeignKey('orders.id', ondelete='CASCADE'), nullable=False)
+    joint_type = Column(SQLEnum(JointType), nullable=False)
+    joint_color = Column(String, nullable=False)
+    quantity = Column(Integer, nullable=False)
+    
+    order = relationship("Order", back_populates="joints")
+
+class OrderGlue(Base):
+    __tablename__ = "order_glue"
+    
+    id = Column(Integer, primary_key=True)
+    order_id = Column(Integer, ForeignKey('orders.id', ondelete='CASCADE'), nullable=False)
+    glue_id = Column(Integer, ForeignKey('glue.id'), nullable=False)
+    quantity = Column(Integer, nullable=False)
+    
+    order = relationship("Order", back_populates="glue")
+    glue = relationship("Glue")
 
 class Order(Base):
     __tablename__ = "orders"
     
     id = Column(Integer, primary_key=True)
     manager_id = Column(Integer, ForeignKey('users.id'), nullable=False)
-    film_code = Column(String, nullable=False)  # Код пленки
-    panel_quantity = Column(Integer, nullable=False)  # Количество панелей
+    film_code = Column(String, nullable=True)  # Оставляем для обратной совместимости
+    panel_quantity = Column(Integer, nullable=False)  # Общее количество панелей
     panel_thickness = Column(Float, nullable=False, default=0.5)  # Толщина панели (0.5 или 0.8)
-    joint_type = Column(SQLEnum(JointType), nullable=False)  # Тип стыка
-    joint_color = Column(String, nullable=False)  # Цвет стыка
-    joint_quantity = Column(Integer, nullable=False)  # Количество стыков
+    joint_type = Column(SQLEnum(JointType), nullable=True)  # Оставляем для обратной совместимости
+    joint_color = Column(String, nullable=True)  # Оставляем для обратной совместимости
+    joint_quantity = Column(Integer, nullable=False)  # Общее количество стыков
     glue_quantity = Column(Integer, nullable=False)  # Количество клея
     installation_required = Column(Boolean, default=False)  # Требуется ли монтаж
     customer_phone = Column(String, nullable=False)  # Телефон клиента
@@ -151,16 +200,28 @@ class Order(Base):
     completed_at = Column(DateTime(timezone=True), nullable=True)
     
     manager = relationship("User", foreign_keys=[manager_id])
+    films = relationship("OrderFilm", back_populates="order", cascade="all, delete-orphan")
+    joints = relationship("OrderJoint", back_populates="order", cascade="all, delete-orphan")
+    products = relationship("OrderProduct", back_populates="order", cascade="all, delete-orphan")
+    glue = relationship("OrderGlue", back_populates="order", cascade="all, delete-orphan")
 
     def to_dict(self):
+        films_data = [{"film_code": film.film_code, "quantity": film.quantity} for film in self.films] if self.films else []
+        joints_data = [{"type": joint.joint_type.value, "color": joint.joint_color, "quantity": joint.quantity} for joint in self.joints] if self.joints else []
+        
+        # Поддержка обратной совместимости
+        if not films_data and self.film_code:
+            films_data = [{"film_code": self.film_code, "quantity": self.panel_quantity}]
+        
+        if not joints_data and self.joint_type:
+            joints_data = [{"type": self.joint_type.value, "color": self.joint_color, "quantity": self.joint_quantity}]
+            
         return {
             "id": self.id,
-            "film_code": self.film_code,
+            "films": films_data,
             "panel_thickness": self.panel_thickness,
             "panel_quantity": self.panel_quantity,
-            "joint_type": self.joint_type.value,
-            "joint_color": self.joint_color,
-            "joint_quantity": self.joint_quantity,
+            "joints": joints_data,
             "glue_quantity": self.glue_quantity,
             "installation_required": self.installation_required,
             "customer_phone": self.customer_phone,
@@ -170,6 +231,27 @@ class Order(Base):
             "completed_at": self.completed_at.isoformat() if self.completed_at else None
         }
 
+class CompletedOrderFilm(Base):
+    __tablename__ = "completed_order_films"
+    
+    id = Column(Integer, primary_key=True)
+    order_id = Column(Integer, ForeignKey('completed_orders.id', ondelete='CASCADE'), nullable=False)
+    film_code = Column(String, nullable=False)
+    quantity = Column(Integer, nullable=False)
+    
+    order = relationship("CompletedOrder", back_populates="films")
+
+class CompletedOrderJoint(Base):
+    __tablename__ = "completed_order_joints"
+    
+    id = Column(Integer, primary_key=True)
+    order_id = Column(Integer, ForeignKey('completed_orders.id', ondelete='CASCADE'), nullable=False)
+    joint_type = Column(SQLEnum(JointType), nullable=False)
+    joint_color = Column(String, nullable=False)
+    quantity = Column(Integer, nullable=False)
+    
+    order = relationship("CompletedOrder", back_populates="joints")
+
 class CompletedOrder(Base):
     __tablename__ = "completed_orders"
     
@@ -177,12 +259,12 @@ class CompletedOrder(Base):
     order_id = Column(Integer, unique=True, nullable=False)  # ID исходного заказа
     manager_id = Column(Integer, ForeignKey('users.id'), nullable=False)
     warehouse_user_id = Column(Integer, ForeignKey('users.id'), nullable=False)  # ID складовщика, выполнившего заказ
-    film_code = Column(String, nullable=False)
+    film_code = Column(String, nullable=True)  # Оставляем для обратной совместимости
     panel_thickness = Column(Float, nullable=False, default=0.5)  # Толщина панели (0.5 или 0.8)
-    panel_quantity = Column(Integer, nullable=False)
-    joint_type = Column(SQLEnum(JointType), nullable=False)
-    joint_color = Column(String, nullable=False)
-    joint_quantity = Column(Integer, nullable=False)
+    panel_quantity = Column(Integer, nullable=False)  # Общее количество панелей
+    joint_type = Column(SQLEnum(JointType), nullable=True)  # Оставляем для обратной совместимости
+    joint_color = Column(String, nullable=True)  # Оставляем для обратной совместимости
+    joint_quantity = Column(Integer, nullable=False)  # Общее количество стыков
     glue_quantity = Column(Integer, nullable=False)
     installation_required = Column(Boolean, default=False)
     customer_phone = Column(String, nullable=False)
@@ -191,17 +273,27 @@ class CompletedOrder(Base):
     
     manager = relationship("User", foreign_keys=[manager_id])
     warehouse_user = relationship("User", foreign_keys=[warehouse_user_id])
+    films = relationship("CompletedOrderFilm", back_populates="order", cascade="all, delete-orphan")
+    joints = relationship("CompletedOrderJoint", back_populates="order", cascade="all, delete-orphan")
 
     def to_dict(self):
+        films_data = [{"film_code": film.film_code, "quantity": film.quantity} for film in self.films] if self.films else []
+        joints_data = [{"type": joint.joint_type.value, "color": joint.joint_color, "quantity": joint.quantity} for joint in self.joints] if self.joints else []
+        
+        # Поддержка обратной совместимости
+        if not films_data and self.film_code:
+            films_data = [{"film_code": self.film_code, "quantity": self.panel_quantity}]
+        
+        if not joints_data and self.joint_type:
+            joints_data = [{"type": self.joint_type.value, "color": self.joint_color, "quantity": self.joint_quantity}]
+            
         return {
             "id": self.id,
             "order_id": self.order_id,
-            "film_code": self.film_code,
+            "films": films_data,
             "panel_thickness": self.panel_thickness,
             "panel_quantity": self.panel_quantity,
-            "joint_type": self.joint_type.value,
-            "joint_color": self.joint_color,
-            "joint_quantity": self.joint_quantity,
+            "joints": joints_data,
             "glue_quantity": self.glue_quantity,
             "installation_required": self.installation_required,
             "customer_phone": self.customer_phone,
