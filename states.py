@@ -97,6 +97,8 @@ class SalesStates(StatesGroup):
     waiting_for_order_joint_color = State()
     waiting_for_order_joint_quantity = State()
     waiting_for_add_more_joints = State()
+    waiting_for_order_more_joints = State()
+    waiting_for_order_glue_needed = State()
     waiting_for_order_glue_quantity = State()
     waiting_for_order_installation = State()
     waiting_for_order_customer_phone = State()
