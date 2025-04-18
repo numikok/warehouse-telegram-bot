@@ -9,6 +9,7 @@ import json
 from datetime import datetime, timedelta
 from navigation import MenuState, get_menu_keyboard, go_back
 import logging
+import re
 
 router = Router()
 
@@ -424,10 +425,29 @@ async def handle_reset_role(message: Message, state: FSMContext):
     try:
         user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
         if user and user.role == UserRole.SUPER_ADMIN:
-            await state.set_state(SuperAdminStates.waiting_for_user_to_reset)
+            # Получаем список всех пользователей
+            users = db.query(User).all()
+            
+            if not users:
+                await message.answer("В системе нет пользователей.")
+                return
+                
+            # Создаем клавиатуру с кнопками для каждого пользователя
+            keyboard = []
+            for u in users:
+                # Пропускаем суперадминов и пользователей без роли
+                if u.role != UserRole.SUPER_ADMIN and u.role != UserRole.NONE:
+                    # Добавляем имя пользователя, роль и ID на кнопку
+                    keyboard.append([KeyboardButton(text=f"{u.username} - {u.role.value} (ID: {u.telegram_id})")])
+                
+            # Добавляем кнопку "Назад"
+            keyboard.append([KeyboardButton(text="◀️ Назад")])
+                
             await message.answer(
-                "Введите Telegram ID пользователя, роль которого нужно сбросить:"
+                "Выберите пользователя, роль которого хотите сбросить:",
+                reply_markup=ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
             )
+            await state.set_state(SuperAdminStates.waiting_for_user_to_reset)
     finally:
         db.close()
 
@@ -437,10 +457,25 @@ async def process_reset_role(message: Message, state: FSMContext):
     try:
         admin = db.query(User).filter(User.telegram_id == message.from_user.id).first()
         if admin and admin.role == UserRole.SUPER_ADMIN:
+            if message.text == "◀️ Назад":
+                await state.clear()
+                await message.answer(
+                    "Операция отменена.",
+                    reply_markup=get_menu_keyboard(MenuState.SUPER_ADMIN_USERS)
+                )
+                return
+                
+            # Извлекаем ID пользователя из текста кнопки (формат: "имя - роль (ID: числовой_id)")
             try:
-                target_user_id = int(message.text)
-            except ValueError:
-                await message.answer("Пожалуйста, введите корректный Telegram ID.")
+                # Находим ID из текста кнопки
+                match = re.search(r'ID: (\d+)', message.text)
+                if match:
+                    target_user_id = int(match.group(1))
+                else:
+                    await message.answer("Не удалось определить ID пользователя. Пожалуйста, попробуйте еще раз.")
+                    return
+            except Exception:
+                await message.answer("Произошла ошибка при определении ID пользователя. Пожалуйста, попробуйте еще раз.")
                 return
 
             # Проверяем, существует ли пользователь
@@ -471,18 +506,9 @@ async def process_reset_role(message: Message, state: FSMContext):
                 logging.error(f"Не удалось отправить уведомление пользователю {target_user.telegram_id}: {str(e)}")
 
             # Возвращаемся в меню управления пользователями
-            keyboard = ReplyKeyboardMarkup(
-                keyboard=[
-                    [KeyboardButton(text="👤 Назначить роль")],
-                    [KeyboardButton(text="📋 Список пользователей")],
-                    [KeyboardButton(text="🔄 Сбросить роль пользователя")],
-                    [KeyboardButton(text="◀️ Назад")]
-                ],
-                resize_keyboard=True
-            )
             await message.answer(
                 f"Роль пользователя {target_user.username} успешно сброшена.",
-                reply_markup=keyboard
+                reply_markup=get_menu_keyboard(MenuState.SUPER_ADMIN_USERS)
             )
             await state.clear()
     finally:
@@ -596,13 +622,18 @@ async def handle_assign_role(message: Message, state: FSMContext):
                 await message.answer("В системе нет пользователей.")
                 return
                 
-            # Формируем сообщение со списком пользователей
-            response = "Список пользователей:\n\n"
+            # Создаем клавиатуру с кнопками для каждого пользователя
+            keyboard = []
             for u in users:
-                response += f"ID: {u.telegram_id}, Имя: {u.username}, Роль: {u.role.value}\n"
+                # Добавляем имя пользователя и ID на кнопку
+                keyboard.append([KeyboardButton(text=f"{u.username} (ID: {u.telegram_id})")])
+                
+            # Добавляем кнопку "Назад"
+            keyboard.append([KeyboardButton(text="◀️ Назад")])
                 
             await message.answer(
-                response + "\n\nВведите Telegram ID пользователя, которому хотите назначить роль:"
+                "Выберите пользователя, которому хотите назначить роль:",
+                reply_markup=ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
             )
             await state.set_state(SuperAdminStates.waiting_for_target_user_id)
     finally:
@@ -614,10 +645,25 @@ async def process_role_assignment(message: Message, state: FSMContext):
     try:
         user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
         if user and user.role == UserRole.SUPER_ADMIN:
+            if message.text == "◀️ Назад":
+                await state.clear()
+                await message.answer(
+                    "Операция отменена.",
+                    reply_markup=get_menu_keyboard(MenuState.SUPER_ADMIN_USERS)
+                )
+                return
+                
+            # Извлекаем ID пользователя из текста кнопки (формат: "имя (ID: числовой_id)")
             try:
-                target_user_id = int(message.text)
-            except ValueError:
-                await message.answer("Пожалуйста, введите корректный Telegram ID.")
+                # Находим ID из текста кнопки
+                match = re.search(r'ID: (\d+)', message.text)
+                if match:
+                    target_user_id = int(match.group(1))
+                else:
+                    await message.answer("Не удалось определить ID пользователя. Пожалуйста, попробуйте еще раз.")
+                    return
+            except Exception:
+                await message.answer("Произошла ошибка при определении ID пользователя. Пожалуйста, попробуйте еще раз.")
                 return
 
             # Проверяем, существует ли пользователь
@@ -655,16 +701,10 @@ async def process_role_selection(message: Message, state: FSMContext):
         if user and user.role == UserRole.SUPER_ADMIN:
             if message.text == "◀️ Назад":
                 await state.clear()
-                keyboard = ReplyKeyboardMarkup(
-                    keyboard=[
-                        [KeyboardButton(text="👤 Назначить роль")],
-                        [KeyboardButton(text="📋 Список пользователей")],
-                        [KeyboardButton(text="🔄 Сбросить роль пользователя")],
-                        [KeyboardButton(text="◀️ Назад")]
-                    ],
-                    resize_keyboard=True
+                await message.answer(
+                    "Операция отменена.",
+                    reply_markup=get_menu_keyboard(MenuState.SUPER_ADMIN_USERS)
                 )
-                await message.answer("Операция отменена.", reply_markup=keyboard)
                 return
 
             # Получаем сохраненный ID пользователя
