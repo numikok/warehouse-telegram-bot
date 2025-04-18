@@ -235,6 +235,7 @@ async def handle_my_orders(message: Message, state: FSMContext):
 async def handle_order_completed(message: Message, state: FSMContext):
     try:
         order_id = int(message.text.split("#")[1].split()[0])
+        logging.info(f"Попытка подтвердить выполнение заказа #{order_id} пользователем {message.from_user.id}")
     except (IndexError, ValueError):
         await message.answer("Неверный формат номера заказа.")
         return
@@ -242,7 +243,11 @@ async def handle_order_completed(message: Message, state: FSMContext):
     db = next(get_db())
     try:
         user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
-        if not user or user.role != UserRole.PRODUCTION:
+        logging.info(f"Пользователь {message.from_user.id} с ролью {user.role if user else 'None'} пытается подтвердить выполнение заказа")
+        
+        # Проверяем, имеет ли пользователь нужную роль (либо производство, либо супер-админ)
+        if not user or (user.role != UserRole.PRODUCTION and user.role != UserRole.SUPER_ADMIN):
+            logging.warning(f"Отказ в доступе для подтверждения заказа пользователю {message.from_user.id} с ролью {user.role if user else 'None'}")
             await message.answer("У вас нет прав для подтверждения выполнения заказов.")
             return
             
