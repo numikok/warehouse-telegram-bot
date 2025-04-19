@@ -723,7 +723,7 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                 glue_quantity=glue_quantity,
                 panel_thickness=0.5,  # Значение по умолчанию, будет обновлено если есть продукты
                 installation_required=installation_required,
-                status=OrderStatus.CREATED
+                status=OrderStatus.NEW
             )
             db.add(order)
             db.flush()
