@@ -657,16 +657,17 @@ async def process_order_delivery_address(message: Message, state: FSMContext):
     if need_joints and selected_joints:
         order_summary += f"🔗 Стыки:\n"
         for joint in selected_joints:
-            joint_type = joint.get('joint_type', '')
+            joint_type = joint.get('type', '')
             joint_type_text = ''
-            if joint_type == 'butterfly':
+            if joint_type == 'butterfly' or joint_type == JointType.BUTTERFLY:
                 joint_type_text = "Бабочка"
-            elif joint_type == 'simple':
+            elif joint_type == 'simple' or joint_type == JointType.SIMPLE:
                 joint_type_text = "Простые"
-            elif joint_type == 'closing':
+            elif joint_type == 'closing' or joint_type == JointType.CLOSING:
                 joint_type_text = "Замыкающие"
             
-            order_summary += f"▪️ {joint_type_text}, {joint.get('thickness', '')} мм, {joint.get('color', '')}: {joint.get('quantity', 0)} шт.\n"
+            thickness = joint.get('thickness', '0.5')
+            order_summary += f"▪️ {joint_type_text}, {thickness} мм, {joint.get('color', '')}: {joint.get('quantity', 0)} шт.\n"
         order_summary += "\n"
     else:
         order_summary += f"🔗 Стыки: Нет\n\n"
@@ -885,7 +886,8 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                                 order_id=order.id,
                                 joint_type=joint_type_enum,
                                 joint_color=color,
-                                quantity=joint_qty
+                                quantity=joint_qty,
+                                joint_thickness=thickness  # Add thickness to the OrderJoint object
                             )
                             db.add(order_joint)
                             
@@ -931,7 +933,8 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                                 order_id=order.id,
                                 joint_type=joint_type_enum,
                                 joint_color=color,
-                                quantity=joint_qty
+                                quantity=joint_qty,
+                                joint_thickness=thickness  # Add thickness to the OrderJoint object
                             )
                             db.add(order_joint)
                             
