@@ -13,6 +13,29 @@ from states import SalesStates
 
 router = Router()
 
+def get_joint_type_keyboard():
+    """Возвращает клавиатуру с типами стыков"""
+    db = next(get_db())
+    try:
+        # Группируем стыки по типу и проверяем наличие
+        butterfly_joints = db.query(Joint).filter(Joint.type == JointType.BUTTERFLY, Joint.quantity > 0).first()
+        simple_joints = db.query(Joint).filter(Joint.type == JointType.SIMPLE, Joint.quantity > 0).first()
+        closing_joints = db.query(Joint).filter(Joint.type == JointType.CLOSING, Joint.quantity > 0).first()
+        
+        keyboard = []
+        if butterfly_joints:
+            keyboard.append([KeyboardButton(text="🦋 Бабочка")])
+        if simple_joints:
+            keyboard.append([KeyboardButton(text="🔄 Простые")])
+        if closing_joints:
+            keyboard.append([KeyboardButton(text="🔒 Замыкающие")])
+        
+        keyboard.append([KeyboardButton(text="◀️ Назад")])
+        
+        return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
+    finally:
+        db.close()
+
 async def check_sales_access(message: Message) -> bool:
     db = next(get_db())
     try:
@@ -345,8 +368,40 @@ async def process_add_more_products(message: Message, state: FSMContext):
     
     if response == "✅ Да":
         # Пользователь хочет добавить еще продукты
-        # Возвращаемся к выбору толщины
-        await handle_create_order(message, state)
+        # Вместо вызова handle_create_order, напрямую показываем список толщин
+        db = next(get_db())
+        try:
+            # Получаем список всех толщин панелей, для которых есть готовая продукция
+            thicknesses = db.query(FinishedProduct.thickness).distinct().all()
+            available_thicknesses = [str(thickness[0]) for thickness in thicknesses]
+            
+            # Если нет доступных толщин, сообщаем об этом
+            if not available_thicknesses:
+                await message.answer(
+                    "На складе нет готовой продукции. Пожалуйста, обратитесь к производству."
+                )
+                return
+            
+            # Формируем клавиатуру с доступными толщинами
+            keyboard_rows = []
+            for thickness in available_thicknesses:
+                keyboard_rows.append([KeyboardButton(text=thickness)])
+            keyboard_rows.append([KeyboardButton(text="◀️ Назад")])
+            
+            keyboard = ReplyKeyboardMarkup(
+                keyboard=keyboard_rows,
+                resize_keyboard=True
+            )
+            
+            await message.answer(
+                "Выберите толщину панелей (мм):",
+                reply_markup=keyboard
+            )
+            
+            # Устанавливаем состояние для выбора толщины, но НЕ очищаем selected_products
+            await state.set_state(SalesStates.product_thickness)
+        finally:
+            db.close()
         return
     elif response == "❌ Нет":
         # Пользователь закончил добавлять продукты
