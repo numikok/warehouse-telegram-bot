@@ -13,6 +13,27 @@ from states import SalesStates
 
 router = Router()
 
+def get_joint_type_keyboard():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Бабочка")],
+            [KeyboardButton(text="Простой")],
+            [KeyboardButton(text="Замыкающий")],
+            [KeyboardButton(text="◀️ Назад")]
+        ],
+        resize_keyboard=True
+    )
+
+def get_joint_thickness_keyboard():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="0.5")],
+            [KeyboardButton(text="0.8")],
+            [KeyboardButton(text="◀️ Назад")]
+        ],
+        resize_keyboard=True
+    )
+
 async def check_sales_access(message: Message) -> bool:
     db = next(get_db())
     try:
