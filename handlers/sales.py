@@ -690,7 +690,7 @@ async def process_order_confirmation(message: Message, state: FSMContext):
         selected_products = data.get("selected_products", [])
         
         # Получаем выбранные стыки из состояния
-        selected_joints = data.get("selected_joints", {})
+        selected_joints = data.get("selected_joints", [])
         
         need_joints = len(selected_joints) > 0
         need_glue = data.get("need_glue", False)
@@ -790,9 +790,11 @@ async def process_order_confirmation(message: Message, state: FSMContext):
             # Если нужны стыки, добавляем их в заказ
             total_joints = 0
             if need_joints and selected_joints:
-                for joint_key, joint_qty in selected_joints.items():
-                    joint_type_val, thickness, color = joint_key.split('|')
-                    thickness = float(thickness)
+                for joint in selected_joints:
+                    joint_type_val = joint.get('type')
+                    thickness = float(joint.get('thickness'))
+                    color = joint.get('color')
+                    joint_qty = joint.get('quantity')
                     total_joints += joint_qty
                     
                     # Преобразуем строковое значение типа стыка обратно в enum
@@ -875,8 +877,12 @@ async def process_order_confirmation(message: Message, state: FSMContext):
             joints_info = ""
             if need_joints and selected_joints:
                 joints_info = "\nСтыки:\n"
-                for joint_key, quantity in selected_joints.items():
-                    joint_type_val, thickness, color = joint_key.split('|')
+                for joint in selected_joints:
+                    joint_type_val = joint.get('type')
+                    thickness = joint.get('thickness')
+                    color = joint.get('color')
+                    quantity = joint.get('quantity')
+                    
                     joint_type_text = ""
                     if joint_type_val == "butterfly":
                         joint_type_text = "Бабочка"
@@ -1588,6 +1594,7 @@ async def process_order_joint_quantity(message: Message, state: FSMContext):
             )
         )
 
+@router.message(SalesStates.waiting_for_order_more_joints)
 async def process_order_more_joints(message: Message, state: FSMContext):
     """Обработка ответа о добавлении дополнительных стыков"""
     user_choice = message.text.strip()
