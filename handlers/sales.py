@@ -3,7 +3,7 @@ from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from models import User, UserRole, Film, Panel, Joint, Glue, FinishedProduct, Operation, JointType, Order, ProductionOrder, OrderStatus, OrderProduct, OrderJoint, OrderGlue
+from models import User, UserRole, Film, Panel, Joint, Glue, FinishedProduct, Operation, JointType, Order, ProductionOrder, OrderStatus, OrderProduct, OrderJoint, OrderGlue, OperationType
 from database import get_db
 import json
 import logging
@@ -816,10 +816,9 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                     
                     # Создаем операцию для готовой продукции
                     operation = Operation(
-                        type=OperationType.READY_PRODUCT_OUT,
-                        film_id=film.id,
+                        operation_type=OperationType.READY_PRODUCT_OUT.value,
                         quantity=qty,
-                        created_by=user.id  # Используем ID пользователя из базы
+                        user_id=user.id  # Используем ID пользователя из базы
                     )
                     
                     db.add(operation)
