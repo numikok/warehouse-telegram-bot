@@ -84,6 +84,8 @@ class SalesStates(StatesGroup):
     joint_quantity = State()
     add_more_joints = State()
     waiting_for_joint_type = State()
+    waiting_for_joint_color = State()
+    waiting_for_joint_quantity = State()
     
     # Общие состояния для заказа
     waiting_for_need_joints = State()
@@ -93,6 +95,16 @@ class SalesStates(StatesGroup):
     waiting_for_customer_phone = State()
     waiting_for_delivery_address = State()
     waiting_for_confirmation = State()
+    
+    # Дополнительные состояния
+    waiting_for_glue_quantity = State()
+    waiting_for_installation = State()
+    waiting_for_phone = State()
+    waiting_for_address = State()
+    current_thickness = State()
+    current_film_code = State()
+    selected_products = State()
+    selected_joints = State()
     
     # Состояния для заказа с множественным выбором
     waiting_for_order_joint_type = State()
