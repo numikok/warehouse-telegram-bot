@@ -708,10 +708,6 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                 manager_id=message.from_user.id,
                 customer_phone=customer_phone,
                 delivery_address=delivery_address,
-                panel_quantity=0,  # Будет обновлено ниже
-                joint_quantity=0,  # Будет обновлено ниже
-                glue_quantity=glue_quantity,
-                panel_thickness=0.5,  # Значение по умолчанию, будет обновлено если есть продукты
                 installation_required=installation_required,
                 status=OrderStatus.NEW
             )
@@ -754,10 +750,10 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                     
                     # Создаем операцию для готовой продукции
                     operation = Operation(
-                        type=OperationType.READY_PRODUCT_OUT,
-                        film_id=film.id,
+                        operation_type=OperationType.READY_PRODUCT_OUT.value,
                         quantity=qty,
-                        created_by=message.from_user.id
+                        user_id=message.from_user.id,
+                        details=json.dumps({"film_id": film.id, "film_code": film_code, "thickness": thickness})
                     )
                     
                     db.add(operation)
