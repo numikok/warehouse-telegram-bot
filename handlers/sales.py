@@ -1,6 +1,6 @@
 from aiogram import Router, F
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
-from aiogram.filters import Command
+from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardRemove
+from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from models import User, UserRole, Film, Panel, Joint, Glue, FinishedProduct, Operation, JointType, Order, ProductionOrder, OrderStatus, OrderJoint, OrderGlue, OperationType, OrderItem
@@ -10,6 +10,8 @@ import logging
 from navigation import MenuState, get_menu_keyboard, go_back
 import re
 from states import SalesStates
+from typing import Optional, Dict, List, Any, Union
+from sqlalchemy import select
 
 router = Router()
 
@@ -713,7 +715,7 @@ async def process_order_delivery_address(message: Message, state: FSMContext):
             elif joint_type == 'closing':
                 joint_type_text = "Замыкающие"
             
-            order_summary += f"▪️ {joint_type_text}, {joint.get('thickness', '')} мм, {joint.get('color', '')}: {joint.get('quantity', 0)} шт.\n"
+            order_summary += f"▪️ Тип: {joint_type_text}, {joint.get('thickness', '')} мм, {joint.get('color', '')}: {joint.get('quantity', 0)} шт.\n"
         order_summary += "\n"
     else:
         order_summary += f"🔗 Стыки: Нет\n\n"
@@ -760,9 +762,25 @@ async def process_order_confirmation(message: Message, state: FSMContext):
         db = next(get_db())
         
         try:
+            # Проверяем наличие пользователя в базе данных
+            user_id = message.from_user.id
+            user = db.query(User).filter(User.telegram_id == user_id).first()
+            
+            # Если пользователя нет, создаем его
+            if not user:
+                username = message.from_user.username or "unknown"
+                user = User(
+                    telegram_id=user_id,
+                    username=username,
+                    role=UserRole.SALES_MANAGER  # По умолчанию присваиваем роль менеджера продаж
+                )
+                db.add(user)
+                db.flush()
+                logging.info(f"Created new user with telegram_id={user_id} and username={username}")
+            
             # Создаем заказ
             order = Order(
-                manager_id=message.from_user.id,
+                manager_id=user_id,
                 customer_phone=customer_phone,
                 delivery_address=delivery_address,
                 installation_required=installation_required,
@@ -944,7 +962,7 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                     elif joint_type_val == "closing":
                         joint_type_text = "Замыкающие"
                     
-                    joints_info += f"▪️ {joint_type_text}, {thickness} мм, {color}: {quantity} шт.\n"
+                    joints_info += f"▪️ Тип: {joint_type_text}, {thickness} мм, {color}: {quantity} шт.\n"
             
             # Формируем итоговое сообщение
             confirmation_message = f"✅ Заказ #{order.id} успешно создан!\n\n"
@@ -2239,7 +2257,7 @@ async def process_order_delivery_address(message: Message, state: FSMContext):
             elif joint_type == 'closing':
                 joint_type_text = "Замыкающие"
             
-            order_summary += f"▪️ {joint_type_text}, {joint.get('thickness', '')} мм, {joint.get('color', '')}: {joint.get('quantity', 0)} шт.\n"
+            order_summary += f"▪️ Тип: {joint_type_text}, {joint.get('thickness', '')} мм, {joint.get('color', '')}: {joint.get('quantity', 0)} шт.\n"
         order_summary += "\n"
     else:
         order_summary += f"🔗 Стыки: Нет\n\n"
