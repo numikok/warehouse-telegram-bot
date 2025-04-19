@@ -635,6 +635,7 @@ async def process_add_more_joints(message: Message, state: FSMContext):
     )
     await state.set_state(SalesStates.waiting_for_order_customer_phone)
 
+@router.message(SalesStates.waiting_for_order_customer_phone)
 async def process_order_customer_phone(message: Message, state: FSMContext):
     """Обработка ввода контактного номера клиента"""
     phone = message.text.strip()
@@ -657,6 +658,7 @@ async def process_order_customer_phone(message: Message, state: FSMContext):
     )
     await state.set_state(SalesStates.waiting_for_order_delivery_address)
 
+@router.message(SalesStates.waiting_for_order_delivery_address)
 async def process_order_delivery_address(message: Message, state: FSMContext):
     """Обработка ввода адреса доставки"""
     address = message.text.strip()
@@ -702,7 +704,7 @@ async def process_order_delivery_address(message: Message, state: FSMContext):
     if need_joints and selected_joints:
         order_summary += f"🔗 Стыки:\n"
         for joint in selected_joints:
-            joint_type = joint.get('joint_type', '')
+            joint_type = joint.get('type', '')
             joint_type_text = ''
             if joint_type == 'butterfly':
                 joint_type_text = "Бабочка"
@@ -1178,7 +1180,7 @@ async def process_order_installation(message: Message, state: FSMContext):
         
         # Переходим к запросу номера телефона
         await message.answer(
-            "Введите контактный номер телефона монтажника:",
+            "Введите контактный номер телефона клиента:",
             reply_markup=get_menu_keyboard(MenuState.SALES_CREATE_ORDER)
         )
         await state.set_state(SalesStates.waiting_for_order_customer_phone)
@@ -1203,103 +1205,6 @@ async def process_order_installation(message: Message, state: FSMContext):
                 resize_keyboard=True
             )
         )
-
-async def process_order_customer_phone(message: Message, state: FSMContext):
-    """Обработка ввода контактного номера клиента"""
-    phone = message.text.strip()
-    
-    # Простая проверка на формат телефона
-    if not phone or len(phone) < 5:  # Минимальная длина для телефона
-        await message.answer(
-            "❌ Пожалуйста, введите корректный номер телефона",
-            reply_markup=get_menu_keyboard(MenuState.SALES_CREATE_ORDER)
-        )
-        return
-    
-    # Сохраняем номер телефона
-    await state.update_data(customer_phone=phone)
-    
-    # Запрашиваем адрес доставки
-    await message.answer(
-        "Введите адрес доставки (или напишите 'нет' если самовывоз):",
-        reply_markup=get_menu_keyboard(MenuState.SALES_CREATE_ORDER)
-    )
-    await state.set_state(SalesStates.waiting_for_order_delivery_address)
-
-async def process_order_delivery_address(message: Message, state: FSMContext):
-    """Обработка ввода адреса доставки"""
-    address = message.text.strip()
-    
-    # Если адрес не указан, считаем самовывозом
-    if address.lower() == "нет":
-        address = "Самовывоз"
-    
-    # Сохраняем адрес доставки
-    await state.update_data(delivery_address=address)
-    
-    # Показываем сводку заказа и запрашиваем подтверждение
-    data = await state.get_data()
-    
-    # Получаем данные о выбранных продуктах
-    selected_products = data.get('selected_products', [])
-    
-    # Получаем данные о выбранных стыках
-    selected_joints = data.get('selected_joints', [])
-    
-    need_joints = data.get('need_joints', False)
-    need_glue = data.get('need_glue', False)
-    glue_quantity = data.get('glue_quantity', 0)
-    installation_required = data.get('installation_required', False)
-    customer_phone = data.get('customer_phone', '')
-    delivery_address = data.get('delivery_address', '')
-    
-    # Формируем текст заказа
-    order_summary = f"📝 Сводка заказа:\n\n"
-    
-    # Добавляем информацию о выбранных продуктах
-    if selected_products:
-        order_summary += f"📦 Выбранные продукты:\n"
-        total_panels = 0
-        for product in selected_products:
-            order_summary += f"▪️ {product['film_code']} (толщина {product['thickness']} мм): {product['quantity']} шт.\n"
-            total_panels += product['quantity']
-        order_summary += f"Всего панелей: {total_panels} шт.\n\n"
-    else:
-        order_summary += "Продукты не выбраны\n\n"
-    
-    # Добавляем информацию о стыках
-    if need_joints and selected_joints:
-        order_summary += f"🔗 Стыки:\n"
-        for joint in selected_joints:
-            joint_type = joint.get('joint_type', '')
-            joint_type_text = ''
-            if joint_type == 'butterfly':
-                joint_type_text = "Бабочка"
-            elif joint_type == 'simple':
-                joint_type_text = "Простые"
-            elif joint_type == 'closing':
-                joint_type_text = "Замыкающие"
-            
-            order_summary += f"▪️ {joint_type_text}, {joint.get('thickness', '')} мм, {joint.get('color', '')}: {joint.get('quantity', 0)} шт.\n"
-        order_summary += "\n"
-    else:
-        order_summary += f"🔗 Стыки: Нет\n\n"
-    
-    # Добавляем остальную информацию
-    order_summary += f"🧴 Клей: {glue_quantity} тюбиков\n"
-    order_summary += f"🔧 Монтаж: {'Требуется' if installation_required else 'Не требуется'}\n"
-    order_summary += f"📞 Контактный телефон: {customer_phone}\n"
-    order_summary += f"🚚 Адрес доставки: {delivery_address}\n"
-    
-    # Запрашиваем подтверждение
-    await state.update_data(order_summary=order_summary)
-    await state.set_state(MenuState.SALES_ORDER_CONFIRM)
-    
-    await message.answer(
-        order_summary + "\n\nПожалуйста, подтвердите заказ:",
-        reply_markup=get_menu_keyboard(MenuState.SALES_ORDER_CONFIRM)
-    )
-    await state.set_state(SalesStates.waiting_for_order_confirmation)
 
 @router.message(SalesStates.waiting_for_order_joint_type)
 async def process_order_joint_type(message: Message, state: FSMContext):
@@ -2325,7 +2230,7 @@ async def process_order_delivery_address(message: Message, state: FSMContext):
     if need_joints and selected_joints:
         order_summary += f"🔗 Стыки:\n"
         for joint in selected_joints:
-            joint_type = joint.get('joint_type', '')
+            joint_type = joint.get('type', '')
             joint_type_text = ''
             if joint_type == 'butterfly':
                 joint_type_text = "Бабочка"
@@ -2345,3 +2250,12 @@ async def process_order_delivery_address(message: Message, state: FSMContext):
     order_summary += f"📞 Контактный телефон: {customer_phone}\n"
     order_summary += f"🚚 Адрес доставки: {delivery_address}\n"
     
+    # Запрашиваем подтверждение
+    await state.update_data(order_summary=order_summary)
+    await state.set_state(MenuState.SALES_ORDER_CONFIRM)
+    
+    await message.answer(
+        order_summary + "\n\nПожалуйста, подтвердите заказ:",
+        reply_markup=get_menu_keyboard(MenuState.SALES_ORDER_CONFIRM)
+    )
+    await state.set_state(SalesStates.waiting_for_order_confirmation)
