@@ -3,7 +3,7 @@ from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from models import User, UserRole, Film, Panel, Joint, Glue, FinishedProduct, Operation, JointType, Order, ProductionOrder, OrderStatus, OrderProduct, OrderJoint, OrderGlue, OperationType
+from models import User, UserRole, Film, Panel, Joint, Glue, FinishedProduct, Operation, JointType, Order, ProductionOrder, OrderStatus, OrderProduct, OrderJoint, OrderGlue, OperationType, OrderFilm, OrderItem
 from database import get_db
 import json
 import logging
@@ -723,58 +723,10 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                 return
             
             # Создаем заказ
-            # Для обратной совместимости, устанавливаем film_code из первого продукта
-            default_film_code = selected_products[0]['film_code'] if selected_products else "Нет"
-            
-            # Для обратной совместимости, устанавливаем joint_type и joint_color из первого стыка
-            default_joint_type = None
-            default_joint_color = None
-            
-            if need_joints:
-                # Обрабатываем первый стык для определения значений по умолчанию
-                if isinstance(selected_joints, list):
-                    # Если selected_joints - список (новый формат)
-                    first_joint = selected_joints[0]
-                    joint_type_val = first_joint.get('type')
-                    color = first_joint.get('color')
-                    
-                    # Преобразуем значение типа стыка в enum
-                    if joint_type_val == JointType.BUTTERFLY or joint_type_val == "butterfly":
-                        default_joint_type = JointType.BUTTERFLY
-                    elif joint_type_val == JointType.SIMPLE or joint_type_val == "simple":
-                        default_joint_type = JointType.SIMPLE
-                    elif joint_type_val == JointType.CLOSING or joint_type_val == "closing":
-                        default_joint_type = JointType.CLOSING
-                elif isinstance(selected_joints, dict):
-                    # Если selected_joints - словарь (старый формат)
-                    first_joint_key = list(selected_joints.keys())[0]
-                    joint_type_val, _, color = first_joint_key.split('|')
-                    
-                    # Преобразуем строковое значение типа стыка в enum
-                    if joint_type_val == "butterfly":
-                        default_joint_type = JointType.BUTTERFLY
-                    elif joint_type_val == "simple":
-                        default_joint_type = JointType.SIMPLE
-                    elif joint_type_val == "closing":
-                        default_joint_type = JointType.CLOSING
-                
-                default_joint_color = color
-            else:
-                # Если нет выбранных стыков, устанавливаем значения по умолчанию
-                default_joint_type = JointType.BUTTERFLY
-                default_joint_color = "Нет"
-            
             order = Order(
                 manager_id=user.id,  # Используем ID пользователя из базы данных, а не telegram_id
-                film_code=default_film_code,  # Устанавливаем значение по умолчанию
                 customer_phone=customer_phone,
                 delivery_address=delivery_address,
-                panel_quantity=0,  # Будет обновлено ниже
-                joint_quantity=0,  # Будет обновлено ниже
-                joint_type=default_joint_type,  # Устанавливаем значение по умолчанию
-                joint_color=default_joint_color,  # Устанавливаем значение по умолчанию
-                glue_quantity=glue_quantity,
-                panel_thickness=0.5,  # Значение по умолчанию, будет обновлено если есть продукты
                 installation_required=installation_required,
                 status=OrderStatus.NEW
             )
@@ -782,19 +734,31 @@ async def process_order_confirmation(message: Message, state: FSMContext):
             db.flush()
             
             # Добавляем продукты в заказ
-            total_panels = 0
             for product in selected_products:
                 film_code = product['film_code']
                 thickness = float(product['thickness'])
                 qty = product['quantity']
-                total_panels += qty
-                
-                # Если есть хотя бы один продукт, установим толщину панели в заказе
-                order.panel_thickness = thickness
                 
                 film = db.query(Film).filter(Film.code == film_code).first()
                 if not film:
                     continue
+                
+                # Создаем OrderFilm запись
+                order_film = OrderFilm(
+                    order_id=order.id,
+                    film_code=film_code,
+                    quantity=qty
+                )
+                db.add(order_film)
+                
+                # Создаем OrderItem запись
+                order_item = OrderItem(
+                    order_id=order.id,
+                    product_id=None,  # Будет заполнено ниже, если есть готовая продукция
+                    quantity=qty,
+                    color=film_code,
+                    thickness=thickness
+                )
                 
                 # Проверяем, есть ли готовая продукция
                 finished_product = db.query(FinishedProduct).join(Film).filter(
@@ -811,6 +775,9 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                         quantity=qty,
                         is_finished=True
                     )
+                    
+                    # Устанавливаем product_id для OrderItem
+                    order_item.product_id = finished_product.id
                     
                     # Уменьшаем количество готовой продукции на складе
                     finished_product.quantity -= qty
@@ -845,12 +812,9 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                     db.add(production_order)
                 
                 db.add(order_product)
-            
-            # Обновляем общее количество панелей в заказе
-            order.panel_quantity = total_panels
+                db.add(order_item)
             
             # Если нужны стыки, добавляем их в заказ
-            total_joints = 0
             if need_joints:
                 if isinstance(selected_joints, list):
                     # Новый формат - список объектов стыков
@@ -859,7 +823,6 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                         thickness = float(joint_data.get('thickness'))
                         color = joint_data.get('color')
                         joint_qty = int(joint_data.get('quantity'))
-                        total_joints += joint_qty
                         
                         # Преобразуем значение типа стыка в enum
                         joint_type_enum = None
@@ -949,19 +912,15 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                             )
                             db.add(operation)
             
-            # Обновляем общее количество стыков в заказе
-            order.joint_quantity = total_joints
-            
-            # Если нужен клей, добавляем в заказ
+            # Если нужен клей, добавляем его в заказ
             if need_glue and glue_quantity > 0:
-                # Получаем объект клея
+                # Проверяем наличие клея на складе
                 glue = db.query(Glue).first()
                 
                 if glue and glue.quantity >= glue_quantity:
-                    # Связываем заказ с клеем
+                    # Создаем связь между заказом и клеем
                     order_glue = OrderGlue(
                         order_id=order.id,
-                        glue_id=glue.id,
                         quantity=glue_quantity
                     )
                     db.add(order_glue)
@@ -2350,16 +2309,17 @@ async def process_order_delivery_address(message: Message, state: FSMContext):
     if need_joints and selected_joints:
         order_summary += f"🔗 Стыки:\n"
         for joint in selected_joints:
-            joint_type = joint.get('joint_type', '')
+            joint_type = joint.get('type', '')
             joint_type_text = ''
-            if joint_type == 'butterfly':
+            if joint_type == 'butterfly' or joint_type == JointType.BUTTERFLY:
                 joint_type_text = "Бабочка"
-            elif joint_type == 'simple':
+            elif joint_type == 'simple' or joint_type == JointType.SIMPLE:
                 joint_type_text = "Простые"
-            elif joint_type == 'closing':
+            elif joint_type == 'closing' or joint_type == JointType.CLOSING:
                 joint_type_text = "Замыкающие"
             
-            order_summary += f"▪️ {joint_type_text}, {joint.get('thickness', '')} мм, {joint.get('color', '')}: {joint.get('quantity', 0)} шт.\n"
+            thickness = joint.get('thickness', '0.5')
+            order_summary += f"▪️ {joint_type_text}, {thickness} мм, {joint.get('color', '')}: {joint.get('quantity', 0)} шт.\n"
         order_summary += "\n"
     else:
         order_summary += f"🔗 Стыки: Нет\n\n"

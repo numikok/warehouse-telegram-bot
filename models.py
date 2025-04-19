@@ -165,32 +165,37 @@ class OrderJoint(Base):
     joint_type = Column(SQLEnum(JointType), nullable=False)
     joint_color = Column(String, nullable=False)
     quantity = Column(Integer, nullable=False)
+    joint_thickness = Column(Float, nullable=False, default=0.5)  # Added thickness field for joints
     
     order = relationship("Order", back_populates="joints")
 
-class OrderGlue(Base):
-    __tablename__ = "order_glue"
+class OrderItem(Base):
+    __tablename__ = "order_items"
     
     id = Column(Integer, primary_key=True)
     order_id = Column(Integer, ForeignKey('orders.id', ondelete='CASCADE'), nullable=False)
-    glue_id = Column(Integer, ForeignKey('glue.id'), nullable=False)
+    product_id = Column(Integer, ForeignKey('finished_products.id'), nullable=True)
     quantity = Column(Integer, nullable=False)
+    color = Column(String, nullable=False)
+    thickness = Column(Float, nullable=False, default=0.5)
     
-    order = relationship("Order", back_populates="glue")
-    glue = relationship("Glue")
+    order = relationship("Order", back_populates="items")
+    product = relationship("FinishedProduct")
+
+class OrderGlue(Base):
+    __tablename__ = "order_glues"  # renamed from order_glue to order_glues for consistency
+    
+    id = Column(Integer, primary_key=True)
+    order_id = Column(Integer, ForeignKey('orders.id', ondelete='CASCADE'), nullable=False)
+    quantity = Column(Integer, nullable=False)  # removed glue_id as per requirement
+    
+    order = relationship("Order", back_populates="glues")  # renamed from glue to glues
 
 class Order(Base):
     __tablename__ = "orders"
     
     id = Column(Integer, primary_key=True)
     manager_id = Column(Integer, ForeignKey('users.id'), nullable=False)
-    film_code = Column(String, nullable=True)  # Оставляем для обратной совместимости
-    panel_quantity = Column(Integer, nullable=False)  # Общее количество панелей
-    panel_thickness = Column(Float, nullable=False, default=0.5)  # Толщина панели (0.5 или 0.8)
-    joint_type = Column(SQLEnum(JointType), nullable=True)  # Оставляем для обратной совместимости
-    joint_color = Column(String, nullable=True)  # Оставляем для обратной совместимости
-    joint_quantity = Column(Integer, nullable=False)  # Общее количество стыков
-    glue_quantity = Column(Integer, nullable=False)  # Количество клея
     installation_required = Column(Boolean, default=False)  # Требуется ли монтаж
     customer_phone = Column(String, nullable=False)  # Телефон клиента
     delivery_address = Column(String, nullable=False)  # Адрес доставки
@@ -203,26 +208,20 @@ class Order(Base):
     films = relationship("OrderFilm", back_populates="order", cascade="all, delete-orphan")
     joints = relationship("OrderJoint", back_populates="order", cascade="all, delete-orphan")
     products = relationship("OrderProduct", back_populates="order", cascade="all, delete-orphan")
-    glue = relationship("OrderGlue", back_populates="order", cascade="all, delete-orphan")
+    items = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan")
+    glues = relationship("OrderGlue", back_populates="order", cascade="all, delete-orphan")
 
     def to_dict(self):
         films_data = [{"film_code": film.film_code, "quantity": film.quantity} for film in self.films] if self.films else []
-        joints_data = [{"type": joint.joint_type.value, "color": joint.joint_color, "quantity": joint.quantity} for joint in self.joints] if self.joints else []
-        
-        # Поддержка обратной совместимости
-        if not films_data and self.film_code:
-            films_data = [{"film_code": self.film_code, "quantity": self.panel_quantity}]
-        
-        if not joints_data and self.joint_type:
-            joints_data = [{"type": self.joint_type.value, "color": self.joint_color, "quantity": self.joint_quantity}]
+        joints_data = [{"type": joint.joint_type.value, "color": joint.joint_color, "quantity": joint.quantity, "thickness": joint.joint_thickness} for joint in self.joints] if self.joints else []
+        items_data = [{"product_id": item.product_id, "color": item.color, "thickness": item.thickness, "quantity": item.quantity} for item in self.items] if self.items else []
             
         return {
             "id": self.id,
             "films": films_data,
-            "panel_thickness": self.panel_thickness,
-            "panel_quantity": self.panel_quantity,
+            "items": items_data,
             "joints": joints_data,
-            "glue_quantity": self.glue_quantity,
+            "glue_quantity": sum([glue.quantity for glue in self.glues]) if self.glues else 0,
             "installation_required": self.installation_required,
             "customer_phone": self.customer_phone,
             "delivery_address": self.delivery_address,
@@ -249,8 +248,30 @@ class CompletedOrderJoint(Base):
     joint_type = Column(SQLEnum(JointType), nullable=False)
     joint_color = Column(String, nullable=False)
     quantity = Column(Integer, nullable=False)
+    joint_thickness = Column(Float, nullable=False, default=0.5)  # Added thickness field for joints
     
     order = relationship("CompletedOrder", back_populates="joints")
+
+class CompletedOrderItem(Base):
+    __tablename__ = "completed_order_items"
+    
+    id = Column(Integer, primary_key=True)
+    order_id = Column(Integer, ForeignKey('completed_orders.id', ondelete='CASCADE'), nullable=False)
+    product_id = Column(Integer, nullable=True)
+    quantity = Column(Integer, nullable=False)
+    color = Column(String, nullable=False)
+    thickness = Column(Float, nullable=False, default=0.5)
+    
+    order = relationship("CompletedOrder", back_populates="items")
+
+class CompletedOrderGlue(Base):
+    __tablename__ = "completed_order_glues"
+    
+    id = Column(Integer, primary_key=True)
+    order_id = Column(Integer, ForeignKey('completed_orders.id', ondelete='CASCADE'), nullable=False)
+    quantity = Column(Integer, nullable=False)
+    
+    order = relationship("CompletedOrder", back_populates="glues")
 
 class CompletedOrder(Base):
     __tablename__ = "completed_orders"
@@ -259,13 +280,6 @@ class CompletedOrder(Base):
     order_id = Column(Integer, unique=True, nullable=False)  # ID исходного заказа
     manager_id = Column(Integer, ForeignKey('users.id'), nullable=False)
     warehouse_user_id = Column(Integer, ForeignKey('users.id'), nullable=False)  # ID складовщика, выполнившего заказ
-    film_code = Column(String, nullable=True)  # Оставляем для обратной совместимости
-    panel_thickness = Column(Float, nullable=False, default=0.5)  # Толщина панели (0.5 или 0.8)
-    panel_quantity = Column(Integer, nullable=False)  # Общее количество панелей
-    joint_type = Column(SQLEnum(JointType), nullable=True)  # Оставляем для обратной совместимости
-    joint_color = Column(String, nullable=True)  # Оставляем для обратной совместимости
-    joint_quantity = Column(Integer, nullable=False)  # Общее количество стыков
-    glue_quantity = Column(Integer, nullable=False)
     installation_required = Column(Boolean, default=False)
     customer_phone = Column(String, nullable=False)
     delivery_address = Column(String, nullable=False)
@@ -275,26 +289,21 @@ class CompletedOrder(Base):
     warehouse_user = relationship("User", foreign_keys=[warehouse_user_id])
     films = relationship("CompletedOrderFilm", back_populates="order", cascade="all, delete-orphan")
     joints = relationship("CompletedOrderJoint", back_populates="order", cascade="all, delete-orphan")
+    items = relationship("CompletedOrderItem", back_populates="order", cascade="all, delete-orphan")
+    glues = relationship("CompletedOrderGlue", back_populates="order", cascade="all, delete-orphan")
 
     def to_dict(self):
         films_data = [{"film_code": film.film_code, "quantity": film.quantity} for film in self.films] if self.films else []
-        joints_data = [{"type": joint.joint_type.value, "color": joint.joint_color, "quantity": joint.quantity} for joint in self.joints] if self.joints else []
-        
-        # Поддержка обратной совместимости
-        if not films_data and self.film_code:
-            films_data = [{"film_code": self.film_code, "quantity": self.panel_quantity}]
-        
-        if not joints_data and self.joint_type:
-            joints_data = [{"type": self.joint_type.value, "color": self.joint_color, "quantity": self.joint_quantity}]
+        joints_data = [{"type": joint.joint_type.value, "color": joint.joint_color, "quantity": joint.quantity, "thickness": joint.joint_thickness} for joint in self.joints] if self.joints else []
+        items_data = [{"product_id": item.product_id, "color": item.color, "thickness": item.thickness, "quantity": item.quantity} for item in self.items] if self.items else []
             
         return {
             "id": self.id,
-            "order_id": self.order_id,
+            "original_order_id": self.order_id,
             "films": films_data,
-            "panel_thickness": self.panel_thickness,
-            "panel_quantity": self.panel_quantity,
+            "items": items_data,
             "joints": joints_data,
-            "glue_quantity": self.glue_quantity,
+            "glue_quantity": sum([glue.quantity for glue in self.glues]) if self.glues else 0,
             "installation_required": self.installation_required,
             "customer_phone": self.customer_phone,
             "delivery_address": self.delivery_address,
