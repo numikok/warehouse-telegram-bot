@@ -713,6 +713,14 @@ async def process_order_confirmation(message: Message, state: FSMContext):
         db = next(get_db())
         
         try:
+            # Получаем пользователя по telegram_id для получения корректного ID в базе
+            user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
+            
+            if not user:
+                await message.answer("❌ Ошибка: пользователь не найден")
+                db.close()
+                return
+            
             # Создаем заказ
             # Для обратной совместимости, устанавливаем film_code из первого продукта
             default_film_code = selected_products[0]['film_code'] if selected_products else "Нет"
@@ -756,7 +764,7 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                 default_joint_color = "Нет"
             
             order = Order(
-                manager_id=message.from_user.id,
+                manager_id=user.id,  # Используем ID пользователя из базы данных, а не telegram_id
                 film_code=default_film_code,  # Устанавливаем значение по умолчанию
                 customer_phone=customer_phone,
                 delivery_address=delivery_address,
@@ -811,7 +819,7 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                         type=OperationType.READY_PRODUCT_OUT,
                         film_id=film.id,
                         quantity=qty,
-                        created_by=message.from_user.id
+                        created_by=user.id  # Используем ID пользователя из базы
                     )
                     
                     db.add(operation)
@@ -827,7 +835,7 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                     
                     # Создаем производственный заказ
                     production_order = ProductionOrder(
-                        manager_id=message.from_user.id,
+                        manager_id=user.id,  # Используем ID пользователя из базы
                         film_id=film.id,
                         panel_thickness=thickness,
                         panel_quantity=qty,
@@ -889,7 +897,7 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                             operation = Operation(
                                 operation_type=OperationType.JOINT_OUT.value,
                                 quantity=joint_qty,
-                                user_id=message.from_user.id
+                                user_id=user.id  # Используем ID пользователя из базы
                             )
                             db.add(operation)
                 elif isinstance(selected_joints, dict):
@@ -935,7 +943,7 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                             operation = Operation(
                                 operation_type=OperationType.JOINT_OUT.value,
                                 quantity=joint_qty,
-                                user_id=message.from_user.id
+                                user_id=user.id  # Используем ID пользователя из базы
                             )
                             db.add(operation)
             
@@ -963,7 +971,7 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                     operation = Operation(
                         operation_type=OperationType.GLUE_OUT.value,
                         quantity=glue_quantity,
-                        user_id=message.from_user.id
+                        user_id=user.id  # Используем ID пользователя из базы
                     )
                     db.add(operation)
             
@@ -1631,8 +1639,21 @@ async def process_order_joint_quantity(message: Message, state: FSMContext):
             order_data = await state.get_data()
             selected_joints = order_data.get('selected_joints', [])
             
-            # Добавляем новый стык
-            selected_joints.append(joint_data)
+            # Проверяем, есть ли уже такой стык в списке
+            duplicate_found = False
+            for i, existing_joint in enumerate(selected_joints):
+                if (existing_joint.get('type') == joint_type and 
+                    existing_joint.get('thickness') == thickness and 
+                    existing_joint.get('color') == color):
+                    # Обновляем количество в существующем стыке
+                    selected_joints[i]['quantity'] += quantity
+                    duplicate_found = True
+                    break
+            
+            # Если дубликат не найден, добавляем новый стык
+            if not duplicate_found:
+                selected_joints.append(joint_data)
+                
             await state.update_data(selected_joints=selected_joints)
             
             # Формируем список выбранных стыков для отображения
