@@ -13,41 +13,6 @@ from states import SalesStates
 
 router = Router()
 
-class SalesStates(StatesGroup):
-    # Состояния для заказа на производство
-    waiting_for_film_color = State()
-    waiting_for_panel_quantity = State()
-    
-    # Состояния для заказа на склад
-    waiting_for_film_code = State()
-    waiting_for_panels_count = State()
-    waiting_for_joint_type = State()
-    waiting_for_joint_color = State()
-    waiting_for_joint_quantity = State()
-    waiting_for_glue_quantity = State()
-    waiting_for_installation = State()
-    waiting_for_phone = State()
-    waiting_for_address = State()
-    
-    # Новые состояния для создания заказа
-    waiting_for_order_film_color = State()
-    waiting_for_order_panel_quantity = State()
-    waiting_for_need_joints = State()
-    waiting_for_order_joint_type = State()
-    waiting_for_order_joint_thickness = State()
-    waiting_for_order_joint_color = State()
-    waiting_for_order_joint_quantity = State()
-    waiting_for_need_glue = State()
-    waiting_for_order_glue_quantity = State()
-    waiting_for_order_installation = State()
-    waiting_for_order_customer_phone = State()
-    waiting_for_order_delivery_address = State()
-    waiting_for_order_confirmation = State()
-    selecting_products = State()
-    product_quantity = State()
-    add_more_products = State()
-    product_thickness = State()
-    current_thickness = State()
     current_film_code = State()
     selected_products = State()
     selected_joints = State()
@@ -754,7 +719,7 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                 glue_quantity=glue_quantity,
                 panel_thickness=0.5,  # Значение по умолчанию, будет обновлено если есть продукты
                 installation_required=installation_required,
-                status=OrderStatus.CREATED
+                status=OrderStatus.NEW
             )
             db.add(order)
             db.flush()
