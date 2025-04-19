@@ -1,7 +1,7 @@
 """Fix order tables structure
 
 Revision ID: fix_order_tables_structure
-Revises: remove_deprecated_order_fields
+Revises: None
 Create Date: 2025-05-09 10:00:00.000000
 
 """
@@ -13,17 +13,30 @@ from sqlalchemy import Column, Integer, String, Float, ForeignKey
 
 # revision identifiers, used by Alembic.
 revision: str = 'fix_order_tables_structure'
-down_revision: Union[str, None] = 'remove_deprecated_order_fields'
+down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     # 1. Проверяем и удаляем таблицу order_films
-    op.drop_table('order_films')
-    op.drop_table('completed_order_films')
+    try:
+        op.drop_table('order_films')
+        print("Dropped order_films table")
+    except Exception as e:
+        print(f"Note: {e}")
+    
+    try:
+        op.drop_table('completed_order_films')
+        print("Dropped completed_order_films table")
+    except Exception as e:
+        print(f"Note: {e}")
     
     # 2. Проверяем и удаляем таблицу order_products
-    op.drop_table('order_products')
+    try:
+        op.drop_table('order_products')
+        print("Dropped order_products table")
+    except Exception as e:
+        print(f"Note: {e}")
     
     # 3. Проверяем наличие столбца joint_thickness в таблице order_joints
     # Этот столбец уже должен существовать, но на всякий случай проверим
