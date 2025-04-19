@@ -717,6 +717,29 @@ async def process_order_confirmation(message: Message, state: FSMContext):
             # Для обратной совместимости, устанавливаем film_code из первого продукта
             default_film_code = selected_products[0]['film_code'] if selected_products else "Нет"
             
+            # Для обратной совместимости, устанавливаем joint_type и joint_color из первого стыка
+            default_joint_type = None
+            default_joint_color = None
+            
+            if selected_joints:
+                # Преобразуем ключ стыка (joint_type|thickness|color) в отдельные значения
+                first_joint_key = list(selected_joints.keys())[0]
+                joint_type_val, _, color = first_joint_key.split('|')
+                
+                # Преобразуем строковое значение типа стыка в enum
+                if joint_type_val == "butterfly":
+                    default_joint_type = JointType.BUTTERFLY
+                elif joint_type_val == "simple":
+                    default_joint_type = JointType.SIMPLE
+                elif joint_type_val == "closing":
+                    default_joint_type = JointType.CLOSING
+                
+                default_joint_color = color
+            else:
+                # Если нет выбранных стыков, устанавливаем значения по умолчанию
+                default_joint_type = JointType.BUTTERFLY
+                default_joint_color = "Нет"
+            
             order = Order(
                 manager_id=message.from_user.id,
                 film_code=default_film_code,  # Устанавливаем значение по умолчанию
@@ -724,6 +747,8 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                 delivery_address=delivery_address,
                 panel_quantity=0,  # Будет обновлено ниже
                 joint_quantity=0,  # Будет обновлено ниже
+                joint_type=default_joint_type,  # Устанавливаем значение по умолчанию
+                joint_color=default_joint_color,  # Устанавливаем значение по умолчанию
                 glue_quantity=glue_quantity,
                 panel_thickness=0.5,  # Значение по умолчанию, будет обновлено если есть продукты
                 installation_required=installation_required,
