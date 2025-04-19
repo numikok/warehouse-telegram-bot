@@ -714,8 +714,12 @@ async def process_order_confirmation(message: Message, state: FSMContext):
         
         try:
             # Создаем заказ
+            # Для обратной совместимости, устанавливаем film_code из первого продукта
+            default_film_code = selected_products[0]['film_code'] if selected_products else "Нет"
+            
             order = Order(
                 manager_id=message.from_user.id,
+                film_code=default_film_code,  # Устанавливаем значение по умолчанию
                 customer_phone=customer_phone,
                 delivery_address=delivery_address,
                 panel_quantity=0,  # Будет обновлено ниже
