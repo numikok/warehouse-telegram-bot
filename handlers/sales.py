@@ -758,27 +758,41 @@ async def process_order_confirmation(message: Message, state: FSMContext):
         installation_required = data.get("installation_required", False)
         glue_quantity = data.get("glue_quantity", 0)
         
-        # Определяем тип заказа (готовая продукция или производство)
-        db = next(get_db())
+        # Проверяем наличие пользователя и создаем его, если нужно
+        user_id = message.from_user.id
+        username = message.from_user.username or "unknown"
         
+        # Отдельная транзакция для создания пользователя
+        db = next(get_db())
         try:
-            # Проверяем наличие пользователя в базе данных
-            user_id = message.from_user.id
+            # Проверяем существование пользователя
             user = db.query(User).filter(User.telegram_id == user_id).first()
             
-            # Если пользователя нет, создаем его
             if not user:
-                username = message.from_user.username or "unknown"
+                logging.info(f"Creating new user with telegram_id={user_id} and username={username}")
+                # Создаем нового пользователя с ролью по умолчанию
                 user = User(
                     telegram_id=user_id,
                     username=username,
-                    role=UserRole.SALES_MANAGER  # По умолчанию присваиваем роль менеджера продаж
+                    role=UserRole.SALES_MANAGER
                 )
                 db.add(user)
-                # Фиксируем создание пользователя перед созданием заказа
                 db.commit()
-                logging.info(f"Created new user with telegram_id={user_id} and username={username}")
-            
+                logging.info(f"User with telegram_id={user_id} successfully created and committed")
+        except Exception as e:
+            db.rollback()
+            logging.error(f"Error creating user: {e}")
+            await message.answer(
+                f"❌ Произошла ошибка при создании пользователя: {e}",
+                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+            )
+            return
+        finally:
+            db.close()
+        
+        # Теперь создаем заказ в новой транзакции
+        db = next(get_db())
+        try:
             # Создаем заказ
             order = Order(
                 manager_id=user_id,
