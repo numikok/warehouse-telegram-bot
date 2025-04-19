@@ -609,7 +609,7 @@ async def process_order_shipment(message: Message, order_id: int):
                         f"✅ Заказ #{order_id} отгружен!\n\n"
                         f"Детали заказа:\n"
                         f"🎨 Продукция:\n{products_info}"
-                        f"🔗 Стыки:\n{joints_info if joints_info else 'Нет\n'}"
+                        f"🔗 Стыки:\n{joints_info if joints_info else 'Нет'}\n"
                         f"🧴 Клей: {order.glue_quantity} шт.\n"
                         f"🔧 Монтаж: {'Требуется' if order.installation_required else 'Не требуется'}\n"
                         f"📞 Телефон клиента: {order.customer_phone}\n"
