@@ -700,9 +700,9 @@ async def process_order_confirmation(message: Message, state: FSMContext):
         selected_products = data.get("selected_products", [])
         
         # Получаем выбранные стыки из состояния
-        selected_joints = data.get("selected_joints", {})
+        selected_joints = data.get("selected_joints", [])
         
-        need_joints = len(selected_joints) > 0
+        need_joints = selected_joints and len(selected_joints) > 0
         need_glue = data.get("need_glue", False)
         customer_phone = data.get("customer_phone", "")
         delivery_address = data.get("delivery_address", "")
@@ -721,18 +721,33 @@ async def process_order_confirmation(message: Message, state: FSMContext):
             default_joint_type = None
             default_joint_color = None
             
-            if selected_joints:
-                # Преобразуем ключ стыка (joint_type|thickness|color) в отдельные значения
-                first_joint_key = list(selected_joints.keys())[0]
-                joint_type_val, _, color = first_joint_key.split('|')
-                
-                # Преобразуем строковое значение типа стыка в enum
-                if joint_type_val == "butterfly":
-                    default_joint_type = JointType.BUTTERFLY
-                elif joint_type_val == "simple":
-                    default_joint_type = JointType.SIMPLE
-                elif joint_type_val == "closing":
-                    default_joint_type = JointType.CLOSING
+            if need_joints:
+                # Обрабатываем первый стык для определения значений по умолчанию
+                if isinstance(selected_joints, list):
+                    # Если selected_joints - список (новый формат)
+                    first_joint = selected_joints[0]
+                    joint_type_val = first_joint.get('type')
+                    color = first_joint.get('color')
+                    
+                    # Преобразуем значение типа стыка в enum
+                    if joint_type_val == JointType.BUTTERFLY or joint_type_val == "butterfly":
+                        default_joint_type = JointType.BUTTERFLY
+                    elif joint_type_val == JointType.SIMPLE or joint_type_val == "simple":
+                        default_joint_type = JointType.SIMPLE
+                    elif joint_type_val == JointType.CLOSING or joint_type_val == "closing":
+                        default_joint_type = JointType.CLOSING
+                elif isinstance(selected_joints, dict):
+                    # Если selected_joints - словарь (старый формат)
+                    first_joint_key = list(selected_joints.keys())[0]
+                    joint_type_val, _, color = first_joint_key.split('|')
+                    
+                    # Преобразуем строковое значение типа стыка в enum
+                    if joint_type_val == "butterfly":
+                        default_joint_type = JointType.BUTTERFLY
+                    elif joint_type_val == "simple":
+                        default_joint_type = JointType.SIMPLE
+                    elif joint_type_val == "closing":
+                        default_joint_type = JointType.CLOSING
                 
                 default_joint_color = color
             else:
@@ -828,51 +843,101 @@ async def process_order_confirmation(message: Message, state: FSMContext):
             
             # Если нужны стыки, добавляем их в заказ
             total_joints = 0
-            if need_joints and selected_joints:
-                for joint_key, joint_qty in selected_joints.items():
-                    joint_type_val, thickness, color = joint_key.split('|')
-                    thickness = float(thickness)
-                    total_joints += joint_qty
-                    
-                    # Преобразуем строковое значение типа стыка обратно в enum
-                    joint_type_enum = None
-                    if joint_type_val == "butterfly":
-                        joint_type_enum = JointType.BUTTERFLY
-                    elif joint_type_val == "simple":
-                        joint_type_enum = JointType.SIMPLE
-                    elif joint_type_val == "closing":
-                        joint_type_enum = JointType.CLOSING
+            if need_joints:
+                if isinstance(selected_joints, list):
+                    # Новый формат - список объектов стыков
+                    for joint_data in selected_joints:
+                        joint_type_val = joint_data.get('type')
+                        thickness = float(joint_data.get('thickness'))
+                        color = joint_data.get('color')
+                        joint_qty = int(joint_data.get('quantity'))
+                        total_joints += joint_qty
                         
-                    if not joint_type_enum:
-                        continue
+                        # Преобразуем значение типа стыка в enum
+                        joint_type_enum = None
+                        if joint_type_val == JointType.BUTTERFLY or joint_type_val == "butterfly":
+                            joint_type_enum = JointType.BUTTERFLY
+                        elif joint_type_val == JointType.SIMPLE or joint_type_val == "simple":
+                            joint_type_enum = JointType.SIMPLE
+                        elif joint_type_val == JointType.CLOSING or joint_type_val == "closing":
+                            joint_type_enum = JointType.CLOSING
+                            
+                        if not joint_type_enum:
+                            continue
+                            
+                        # Находим соответствующий стык в базе
+                        joint = db.query(Joint).filter(
+                            Joint.type == joint_type_enum,
+                            Joint.thickness == thickness,
+                            Joint.color == color
+                        ).first()
                         
-                    # Находим соответствующий стык в базе
-                    joint = db.query(Joint).filter(
-                        Joint.type == joint_type_enum,
-                        Joint.thickness == thickness,
-                        Joint.color == color
-                    ).first()
-                    
-                    if joint and joint.quantity >= joint_qty:
-                        # Создаем связь между заказом и стыком
-                        order_joint = OrderJoint(
-                            order_id=order.id,
-                            joint_type=joint_type_enum,
-                            joint_color=color,
-                            quantity=joint_qty
-                        )
-                        db.add(order_joint)
+                        if joint and joint.quantity >= joint_qty:
+                            # Создаем связь между заказом и стыком
+                            order_joint = OrderJoint(
+                                order_id=order.id,
+                                joint_type=joint_type_enum,
+                                joint_color=color,
+                                quantity=joint_qty
+                            )
+                            db.add(order_joint)
+                            
+                            # Уменьшаем количество стыков на складе
+                            joint.quantity -= joint_qty
+                            
+                            # Создаем операцию
+                            operation = Operation(
+                                operation_type=OperationType.JOINT_OUT.value,
+                                quantity=joint_qty,
+                                user_id=message.from_user.id
+                            )
+                            db.add(operation)
+                elif isinstance(selected_joints, dict):
+                    # Старый формат - словарь
+                    for joint_key, joint_qty in selected_joints.items():
+                        joint_type_val, thickness, color = joint_key.split('|')
+                        thickness = float(thickness)
+                        total_joints += joint_qty
                         
-                        # Уменьшаем количество стыков на складе
-                        joint.quantity -= joint_qty
+                        # Преобразуем строковое значение типа стыка обратно в enum
+                        joint_type_enum = None
+                        if joint_type_val == "butterfly":
+                            joint_type_enum = JointType.BUTTERFLY
+                        elif joint_type_val == "simple":
+                            joint_type_enum = JointType.SIMPLE
+                        elif joint_type_val == "closing":
+                            joint_type_enum = JointType.CLOSING
+                            
+                        if not joint_type_enum:
+                            continue
+                            
+                        # Находим соответствующий стык в базе
+                        joint = db.query(Joint).filter(
+                            Joint.type == joint_type_enum,
+                            Joint.thickness == thickness,
+                            Joint.color == color
+                        ).first()
                         
-                        # Создаем операцию
-                        operation = Operation(
-                            operation_type=OperationType.JOINT_OUT.value,
-                            quantity=joint_qty,
-                            user_id=message.from_user.id
-                        )
-                        db.add(operation)
+                        if joint and joint.quantity >= joint_qty:
+                            # Создаем связь между заказом и стыком
+                            order_joint = OrderJoint(
+                                order_id=order.id,
+                                joint_type=joint_type_enum,
+                                joint_color=color,
+                                quantity=joint_qty
+                            )
+                            db.add(order_joint)
+                            
+                            # Уменьшаем количество стыков на складе
+                            joint.quantity -= joint_qty
+                            
+                            # Создаем операцию
+                            operation = Operation(
+                                operation_type=OperationType.JOINT_OUT.value,
+                                quantity=joint_qty,
+                                user_id=message.from_user.id
+                            )
+                            db.add(operation)
             
             # Обновляем общее количество стыков в заказе
             order.joint_quantity = total_joints
@@ -912,19 +977,38 @@ async def process_order_confirmation(message: Message, state: FSMContext):
             
             # Формируем информацию о стыках в заказе
             joints_info = ""
-            if need_joints and selected_joints:
+            if need_joints:
                 joints_info = "\nСтыки:\n"
-                for joint_key, quantity in selected_joints.items():
-                    joint_type_val, thickness, color = joint_key.split('|')
-                    joint_type_text = ""
-                    if joint_type_val == "butterfly":
-                        joint_type_text = "Бабочка"
-                    elif joint_type_val == "simple":
-                        joint_type_text = "Простые"
-                    elif joint_type_val == "closing":
-                        joint_type_text = "Замыкающие"
-                    
-                    joints_info += f"▪️ {joint_type_text}, {thickness} мм, {color}: {quantity} шт.\n"
+                if isinstance(selected_joints, list):
+                    # Список объектов стыков (новый формат)
+                    for joint_data in selected_joints:
+                        joint_type_val = joint_data.get('type')
+                        thickness = joint_data.get('thickness')
+                        color = joint_data.get('color')
+                        quantity = joint_data.get('quantity')
+                        
+                        joint_type_text = ""
+                        if joint_type_val == JointType.BUTTERFLY or joint_type_val == "butterfly":
+                            joint_type_text = "Бабочка"
+                        elif joint_type_val == JointType.SIMPLE or joint_type_val == "simple":
+                            joint_type_text = "Простые"
+                        elif joint_type_val == JointType.CLOSING or joint_type_val == "closing":
+                            joint_type_text = "Замыкающие"
+                        
+                        joints_info += f"▪️ {joint_type_text}, {thickness} мм, {color}: {quantity} шт.\n"
+                elif isinstance(selected_joints, dict):
+                    # Словарь (старый формат)
+                    for joint_key, quantity in selected_joints.items():
+                        joint_type_val, thickness, color = joint_key.split('|')
+                        joint_type_text = ""
+                        if joint_type_val == "butterfly":
+                            joint_type_text = "Бабочка"
+                        elif joint_type_val == "simple":
+                            joint_type_text = "Простые"
+                        elif joint_type_val == "closing":
+                            joint_type_text = "Замыкающие"
+                        
+                        joints_info += f"▪️ {joint_type_text}, {thickness} мм, {color}: {quantity} шт.\n"
             
             # Формируем итоговое сообщение
             confirmation_message = f"✅ Заказ #{order.id} успешно создан!\n\n"
