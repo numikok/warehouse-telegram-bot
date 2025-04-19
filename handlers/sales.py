@@ -775,7 +775,8 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                     role=UserRole.SALES_MANAGER  # По умолчанию присваиваем роль менеджера продаж
                 )
                 db.add(user)
-                db.flush()
+                # Фиксируем создание пользователя перед созданием заказа
+                db.commit()
                 logging.info(f"Created new user with telegram_id={user_id} and username={username}")
             
             # Создаем заказ
@@ -1254,9 +1255,16 @@ async def process_order_joint_type(message: Message, state: FSMContext):
     }
     
     joint_type = None
+    joint_type_str = ""
     for key in joint_type_map:
         if key.lower() in user_choice.lower():
             joint_type = joint_type_map[key]
+            if "бабочка" in key.lower():
+                joint_type_str = "butterfly"
+            elif "простые" in key.lower():
+                joint_type_str = "simple"
+            elif "замыкающие" in key.lower():
+                joint_type_str = "closing"
             break
     
     if not joint_type:
@@ -1274,8 +1282,8 @@ async def process_order_joint_type(message: Message, state: FSMContext):
         )
         return
     
-    # Сохраняем выбранный тип стыка
-    await state.update_data(joint_type=joint_type)
+    # Сохраняем выбранный тип стыка и его строковое представление
+    await state.update_data(joint_type=joint_type, joint_type_str=joint_type_str)
     
     # Запрашиваем толщину стыка
     keyboard = ReplyKeyboardMarkup(
@@ -1487,19 +1495,20 @@ async def process_order_joint_quantity(message: Message, state: FSMContext):
     
     try:
         quantity = int(user_choice)
-        
         if quantity <= 0:
-            raise ValueError("Количество должно быть положительным числом")
+            await message.answer("Количество должно быть положительным числом.")
+            return
         
-        # Получаем данные о выбранном стыке
+        # Проверяем доступное количество стыков
         data = await state.get_data()
         joint_type = data.get('joint_type')
+        joint_type_str = data.get('joint_type_str', '')  # Получаем строковое представление
         thickness = data.get('joint_thickness')
         color = data.get('joint_color')
         
-        # Проверяем наличие достаточного количества стыков
         db = next(get_db())
         try:
+            # Находим стык в базе
             joint = db.query(Joint).filter(
                 Joint.type == joint_type,
                 Joint.thickness == thickness,
@@ -1507,31 +1516,28 @@ async def process_order_joint_quantity(message: Message, state: FSMContext):
             ).first()
             
             if not joint or joint.quantity < quantity:
+                max_quantity = joint.quantity if joint else 0
                 await message.answer(
-                    f"❌ Недостаточно стыков в наличии. Доступно: {joint.quantity if joint else 0} шт.",
+                    f"К сожалению, недостаточно стыков. Доступно: {max_quantity} шт.",
                     reply_markup=ReplyKeyboardMarkup(
-                        keyboard=[
-                            [KeyboardButton(text="◀️ Назад")]
-                        ],
+                        keyboard=[[KeyboardButton(text="◀️ Назад")]],
                         resize_keyboard=True
                     )
                 )
                 return
             
-            # Сохраняем количество стыков
+            # Сохраняем выбранные стыки в состоянии
+            selected_joints = data.get('selected_joints', [])
+            
             joint_data = {
-                'type': joint_type,
-                'thickness': thickness,
-                'color': color,
-                'quantity': quantity
+                "type": joint_type_str,  # Используем строковое представление типа стыка
+                "color": color,
+                "thickness": thickness,
+                "quantity": quantity
             }
             
             # Сохраняем последний выбранный стык для возможности вернуться назад
             await state.update_data(last_joint=joint_data)
-            
-            # Получаем текущий список выбранных стыков
-            order_data = await state.get_data()
-            selected_joints = order_data.get('selected_joints', [])
             
             # Добавляем новый стык
             selected_joints.append(joint_data)
@@ -1558,15 +1564,7 @@ async def process_order_joint_quantity(message: Message, state: FSMContext):
         finally:
             db.close()
     except ValueError:
-        await message.answer(
-            "❌ Пожалуйста, введите корректное число.",
-            reply_markup=ReplyKeyboardMarkup(
-                keyboard=[
-                    [KeyboardButton(text="◀️ Назад")]
-                ],
-                resize_keyboard=True
-            )
-        )
+        await message.answer("Пожалуйста, введите корректное число.")
 
 @router.message(SalesStates.waiting_for_order_more_joints)
 async def process_order_more_joints(message: Message, state: FSMContext):
@@ -2003,19 +2001,20 @@ async def process_order_joint_quantity(message: Message, state: FSMContext):
     
     try:
         quantity = int(user_choice)
-        
         if quantity <= 0:
-            raise ValueError("Количество должно быть положительным числом")
+            await message.answer("Количество должно быть положительным числом.")
+            return
         
-        # Получаем данные о выбранном стыке
+        # Проверяем доступное количество стыков
         data = await state.get_data()
         joint_type = data.get('joint_type')
+        joint_type_str = data.get('joint_type_str', '')  # Получаем строковое представление
         thickness = data.get('joint_thickness')
         color = data.get('joint_color')
         
-        # Проверяем наличие достаточного количества стыков
         db = next(get_db())
         try:
+            # Находим стык в базе
             joint = db.query(Joint).filter(
                 Joint.type == joint_type,
                 Joint.thickness == thickness,
@@ -2023,31 +2022,28 @@ async def process_order_joint_quantity(message: Message, state: FSMContext):
             ).first()
             
             if not joint or joint.quantity < quantity:
+                max_quantity = joint.quantity if joint else 0
                 await message.answer(
-                    f"❌ Недостаточно стыков в наличии. Доступно: {joint.quantity if joint else 0} шт.",
+                    f"К сожалению, недостаточно стыков. Доступно: {max_quantity} шт.",
                     reply_markup=ReplyKeyboardMarkup(
-                        keyboard=[
-                            [KeyboardButton(text="◀️ Назад")]
-                        ],
+                        keyboard=[[KeyboardButton(text="◀️ Назад")]],
                         resize_keyboard=True
                     )
                 )
                 return
             
-            # Сохраняем количество стыков
+            # Сохраняем выбранные стыки в состоянии
+            selected_joints = data.get('selected_joints', [])
+            
             joint_data = {
-                'type': joint_type,
-                'thickness': thickness,
-                'color': color,
-                'quantity': quantity
+                "type": joint_type_str,  # Используем строковое представление типа стыка
+                "color": color,
+                "thickness": thickness,
+                "quantity": quantity
             }
             
             # Сохраняем последний выбранный стык для возможности вернуться назад
             await state.update_data(last_joint=joint_data)
-            
-            # Получаем текущий список выбранных стыков
-            order_data = await state.get_data()
-            selected_joints = order_data.get('selected_joints', [])
             
             # Добавляем новый стык
             selected_joints.append(joint_data)
@@ -2074,15 +2070,7 @@ async def process_order_joint_quantity(message: Message, state: FSMContext):
         finally:
             db.close()
     except ValueError:
-        await message.answer(
-            "❌ Пожалуйста, введите корректное число.",
-            reply_markup=ReplyKeyboardMarkup(
-                keyboard=[
-                    [KeyboardButton(text="◀️ Назад")]
-                ],
-                resize_keyboard=True
-            )
-        )
+        await message.answer("Пожалуйста, введите корректное число.")
 
 async def process_order_more_joints(message: Message, state: FSMContext):
     """Обработка ответа о добавлении дополнительных стыков"""
