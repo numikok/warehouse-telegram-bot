@@ -134,29 +134,6 @@ class OrderStatus(enum.Enum):
     CANCELLED = "cancelled"
     CREATED = "created"
 
-class OrderFilm(Base):
-    __tablename__ = "order_films"
-    
-    id = Column(Integer, primary_key=True)
-    order_id = Column(Integer, ForeignKey('orders.id', ondelete='CASCADE'), nullable=False)
-    film_code = Column(String, nullable=False)
-    quantity = Column(Integer, nullable=False)
-    
-    order = relationship("Order", back_populates="films")
-
-class OrderProduct(Base):
-    __tablename__ = "order_products"
-    
-    id = Column(Integer, primary_key=True)
-    order_id = Column(Integer, ForeignKey('orders.id', ondelete='CASCADE'), nullable=False)
-    film_id = Column(Integer, ForeignKey('films.id'), nullable=False)
-    thickness = Column(Float, nullable=False, default=0.5)  # Толщина панели (0.5 или 0.8)
-    quantity = Column(Integer, nullable=False)
-    is_finished = Column(Boolean, default=True)  # Является ли готовой продукцией или требует производства
-    
-    order = relationship("Order", back_populates="products")
-    film = relationship("Film")
-
 class OrderJoint(Base):
     __tablename__ = "order_joints"
     
@@ -165,7 +142,7 @@ class OrderJoint(Base):
     joint_type = Column(SQLEnum(JointType), nullable=False)
     joint_color = Column(String, nullable=False)
     quantity = Column(Integer, nullable=False)
-    joint_thickness = Column(Float, nullable=False, default=0.5)  # Added thickness field for joints
+    joint_thickness = Column(Float, nullable=False, default=0.5)  # Толщина стыка (0.5 или 0.8)
     
     order = relationship("Order", back_populates="joints")
 
@@ -177,19 +154,19 @@ class OrderItem(Base):
     product_id = Column(Integer, ForeignKey('finished_products.id'), nullable=True)
     quantity = Column(Integer, nullable=False)
     color = Column(String, nullable=False)
-    thickness = Column(Float, nullable=False, default=0.5)
+    thickness = Column(Float, nullable=False, default=0.5)  # Толщина продукции (0.5 или 0.8)
     
     order = relationship("Order", back_populates="items")
     product = relationship("FinishedProduct")
 
 class OrderGlue(Base):
-    __tablename__ = "order_glues"  # renamed from order_glue to order_glues for consistency
+    __tablename__ = "order_glues"
     
     id = Column(Integer, primary_key=True)
     order_id = Column(Integer, ForeignKey('orders.id', ondelete='CASCADE'), nullable=False)
-    quantity = Column(Integer, nullable=False)  # removed glue_id as per requirement
+    quantity = Column(Integer, nullable=False)
     
-    order = relationship("Order", back_populates="glues")  # renamed from glue to glues
+    order = relationship("Order", back_populates="glues")
 
 class Order(Base):
     __tablename__ = "orders"
@@ -205,20 +182,16 @@ class Order(Base):
     completed_at = Column(DateTime(timezone=True), nullable=True)
     
     manager = relationship("User", foreign_keys=[manager_id])
-    films = relationship("OrderFilm", back_populates="order", cascade="all, delete-orphan")
     joints = relationship("OrderJoint", back_populates="order", cascade="all, delete-orphan")
-    products = relationship("OrderProduct", back_populates="order", cascade="all, delete-orphan")
     items = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan")
     glues = relationship("OrderGlue", back_populates="order", cascade="all, delete-orphan")
 
     def to_dict(self):
-        films_data = [{"film_code": film.film_code, "quantity": film.quantity} for film in self.films] if self.films else []
         joints_data = [{"type": joint.joint_type.value, "color": joint.joint_color, "quantity": joint.quantity, "thickness": joint.joint_thickness} for joint in self.joints] if self.joints else []
         items_data = [{"product_id": item.product_id, "color": item.color, "thickness": item.thickness, "quantity": item.quantity} for item in self.items] if self.items else []
             
         return {
             "id": self.id,
-            "films": films_data,
             "items": items_data,
             "joints": joints_data,
             "glue_quantity": sum([glue.quantity for glue in self.glues]) if self.glues else 0,
@@ -230,16 +203,6 @@ class Order(Base):
             "completed_at": self.completed_at.isoformat() if self.completed_at else None
         }
 
-class CompletedOrderFilm(Base):
-    __tablename__ = "completed_order_films"
-    
-    id = Column(Integer, primary_key=True)
-    order_id = Column(Integer, ForeignKey('completed_orders.id', ondelete='CASCADE'), nullable=False)
-    film_code = Column(String, nullable=False)
-    quantity = Column(Integer, nullable=False)
-    
-    order = relationship("CompletedOrder", back_populates="films")
-
 class CompletedOrderJoint(Base):
     __tablename__ = "completed_order_joints"
     
@@ -248,7 +211,7 @@ class CompletedOrderJoint(Base):
     joint_type = Column(SQLEnum(JointType), nullable=False)
     joint_color = Column(String, nullable=False)
     quantity = Column(Integer, nullable=False)
-    joint_thickness = Column(Float, nullable=False, default=0.5)  # Added thickness field for joints
+    joint_thickness = Column(Float, nullable=False, default=0.5)  # Толщина стыка (0.5 или 0.8)
     
     order = relationship("CompletedOrder", back_populates="joints")
 
@@ -260,7 +223,7 @@ class CompletedOrderItem(Base):
     product_id = Column(Integer, nullable=True)
     quantity = Column(Integer, nullable=False)
     color = Column(String, nullable=False)
-    thickness = Column(Float, nullable=False, default=0.5)
+    thickness = Column(Float, nullable=False, default=0.5)  # Толщина продукции (0.5 или 0.8)
     
     order = relationship("CompletedOrder", back_populates="items")
 
@@ -287,20 +250,17 @@ class CompletedOrder(Base):
     
     manager = relationship("User", foreign_keys=[manager_id])
     warehouse_user = relationship("User", foreign_keys=[warehouse_user_id])
-    films = relationship("CompletedOrderFilm", back_populates="order", cascade="all, delete-orphan")
     joints = relationship("CompletedOrderJoint", back_populates="order", cascade="all, delete-orphan")
     items = relationship("CompletedOrderItem", back_populates="order", cascade="all, delete-orphan")
     glues = relationship("CompletedOrderGlue", back_populates="order", cascade="all, delete-orphan")
 
     def to_dict(self):
-        films_data = [{"film_code": film.film_code, "quantity": film.quantity} for film in self.films] if self.films else []
         joints_data = [{"type": joint.joint_type.value, "color": joint.joint_color, "quantity": joint.quantity, "thickness": joint.joint_thickness} for joint in self.joints] if self.joints else []
         items_data = [{"product_id": item.product_id, "color": item.color, "thickness": item.thickness, "quantity": item.quantity} for item in self.items] if self.items else []
             
         return {
             "id": self.id,
             "original_order_id": self.order_id,
-            "films": films_data,
             "items": items_data,
             "joints": joints_data,
             "glue_quantity": sum([glue.quantity for glue in self.glues]) if self.glues else 0,

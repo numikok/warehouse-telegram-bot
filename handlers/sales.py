@@ -733,7 +733,7 @@ async def process_order_confirmation(message: Message, state: FSMContext):
             db.add(order)
             db.flush()
             
-            # Добавляем продукты в заказ
+            # Добавляем продукты в заказ через OrderItem
             for product in selected_products:
                 film_code = product['film_code']
                 thickness = float(product['thickness'])
@@ -743,43 +743,24 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                 if not film:
                     continue
                 
-                # Создаем OrderFilm запись
-                order_film = OrderFilm(
-                    order_id=order.id,
-                    film_code=film_code,
-                    quantity=qty
-                )
-                db.add(order_film)
-                
-                # Создаем OrderItem запись
-                order_item = OrderItem(
-                    order_id=order.id,
-                    product_id=None,  # Будет заполнено ниже, если есть готовая продукция
-                    quantity=qty,
-                    color=film_code,
-                    thickness=thickness
-                )
-                
                 # Проверяем, есть ли готовая продукция
                 finished_product = db.query(FinishedProduct).join(Film).filter(
                     Film.code == film_code,
                     FinishedProduct.thickness == thickness
                 ).first()
                 
+                # Создаем запись OrderItem
+                order_item = OrderItem(
+                    order_id=order.id,
+                    product_id=finished_product.id if finished_product else None,
+                    quantity=qty,
+                    color=film_code,
+                    thickness=thickness
+                )
+                db.add(order_item)
+                
                 if finished_product and finished_product.quantity >= qty:
-                    # Если есть готовая продукция, используем её
-                    order_product = OrderProduct(
-                        order_id=order.id,
-                        film_id=film.id,
-                        thickness=thickness,
-                        quantity=qty,
-                        is_finished=True
-                    )
-                    
-                    # Устанавливаем product_id для OrderItem
-                    order_item.product_id = finished_product.id
-                    
-                    # Уменьшаем количество готовой продукции на складе
+                    # Если есть готовая продукция, уменьшаем ее количество
                     finished_product.quantity -= qty
                     
                     # Создаем операцию для готовой продукции
@@ -788,19 +769,9 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                         quantity=qty,
                         user_id=user.id  # Используем ID пользователя из базы
                     )
-                    
                     db.add(operation)
                 else:
                     # Если нет готовой продукции, создаем заказ на производство
-                    order_product = OrderProduct(
-                        order_id=order.id,
-                        film_id=film.id,
-                        thickness=thickness,
-                        quantity=qty,
-                        is_finished=False
-                    )
-                    
-                    # Создаем производственный заказ
                     production_order = ProductionOrder(
                         manager_id=user.id,  # Используем ID пользователя из базы
                         film_id=film.id,
@@ -808,11 +779,7 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                         panel_quantity=qty,
                         status="new"
                     )
-                    
                     db.add(production_order)
-                
-                db.add(order_product)
-                db.add(order_item)
             
             # Если нужны стыки, добавляем их в заказ
             if need_joints:
@@ -850,54 +817,7 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                                 joint_type=joint_type_enum,
                                 joint_color=color,
                                 quantity=joint_qty,
-                                joint_thickness=thickness  # Add thickness to the OrderJoint object
-                            )
-                            db.add(order_joint)
-                            
-                            # Уменьшаем количество стыков на складе
-                            joint.quantity -= joint_qty
-                            
-                            # Создаем операцию
-                            operation = Operation(
-                                operation_type=OperationType.JOINT_OUT.value,
-                                quantity=joint_qty,
-                                user_id=user.id  # Используем ID пользователя из базы
-                            )
-                            db.add(operation)
-                elif isinstance(selected_joints, dict):
-                    # Старый формат - словарь
-                    for joint_key, joint_qty in selected_joints.items():
-                        joint_type_val, thickness, color = joint_key.split('|')
-                        thickness = float(thickness)
-                        total_joints += joint_qty
-                        
-                        # Преобразуем строковое значение типа стыка обратно в enum
-                        joint_type_enum = None
-                        if joint_type_val == "butterfly":
-                            joint_type_enum = JointType.BUTTERFLY
-                        elif joint_type_val == "simple":
-                            joint_type_enum = JointType.SIMPLE
-                        elif joint_type_val == "closing":
-                            joint_type_enum = JointType.CLOSING
-                            
-                        if not joint_type_enum:
-                            continue
-                            
-                        # Находим соответствующий стык в базе
-                        joint = db.query(Joint).filter(
-                            Joint.type == joint_type_enum,
-                            Joint.thickness == thickness,
-                            Joint.color == color
-                        ).first()
-                        
-                        if joint and joint.quantity >= joint_qty:
-                            # Создаем связь между заказом и стыком
-                            order_joint = OrderJoint(
-                                order_id=order.id,
-                                joint_type=joint_type_enum,
-                                joint_color=color,
-                                quantity=joint_qty,
-                                joint_thickness=thickness  # Add thickness to the OrderJoint object
+                                joint_thickness=thickness
                             )
                             db.add(order_joint)
                             
