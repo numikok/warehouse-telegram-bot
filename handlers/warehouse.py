@@ -3,7 +3,7 @@ from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKey
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from models import User, UserRole, Film, Panel, Joint, Glue, Operation, FinishedProduct, Order, CompletedOrder, OrderStatus
+from models import User, UserRole, Film, Panel, Joint, Glue, Operation, FinishedProduct, Order, CompletedOrder, OrderStatus, JointType
 from database import get_db
 import json
 import logging
@@ -137,132 +137,7 @@ async def process_confirmation(message: Message, state: FSMContext):
     data = await state.get_data()
     order_id = data["order_id"]
     
-    db = next(get_db())
-    try:
-        # Получаем заказ из базы данных
-        order = db.query(Order).filter(Order.id == order_id).first()
-        
-        if not order:
-            await message.answer(
-                f"❌ Заказ #{order_id} не найден или уже выполнен.",
-                reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_ORDERS)
-            )
-            return
-        
-        # Получаем информацию о материалах
-        finished_product = db.query(FinishedProduct).join(Film).filter(
-            Film.code == order.film_code,
-            FinishedProduct.thickness == order.panel_thickness  # Проверяем толщину
-        ).first()
-        
-        # Проверяем наличие материалов
-        missing_materials = []
-        
-        if not finished_product or finished_product.quantity < order.panel_quantity:
-            available = finished_product.quantity if finished_product else 0
-            missing_materials.append(f"Пленка {order.film_code}: требуется {order.panel_quantity} шт., доступно {available} шт.")
-        
-        if order.joint_quantity > 0:
-            joint = db.query(Joint).filter(
-                Joint.type == order.joint_type,
-                Joint.color == order.joint_color
-            ).first()
-            
-            if not joint or joint.quantity < order.joint_quantity:
-                available = joint.quantity if joint else 0
-                missing_materials.append(f"Стыки {order.joint_color}: требуется {order.joint_quantity} шт., доступно {available} шт.")
-        
-        if order.glue_quantity > 0:
-            glue = db.query(Glue).first()
-            
-            if not glue or glue.quantity < order.glue_quantity:
-                available = glue.quantity if glue else 0
-                missing_materials.append(f"Клей: требуется {order.glue_quantity} шт., доступно {available} шт.")
-        
-        # Если не хватает материалов, сообщаем об этом
-        if missing_materials:
-            await message.answer(
-                f"❌ Не хватает материалов для выполнения заказа #{order_id}:\n\n" + "\n".join(missing_materials),
-                reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_ORDERS)
-            )
-            return
-        
-        # Получаем пользователя-складовщика
-        warehouse_user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
-        
-        # Списываем материалы
-        finished_product.quantity -= order.panel_quantity
-        
-        if order.joint_quantity > 0:
-            joint = db.query(Joint).filter(
-                Joint.type == order.joint_type,
-                Joint.color == order.joint_color
-            ).first()
-            joint.quantity -= order.joint_quantity
-        
-        if order.glue_quantity > 0:
-            glue = db.query(Glue).first()
-            glue.quantity -= order.glue_quantity
-            
-        # Создаем запись о выполненном заказе
-        completed_order = CompletedOrder(
-            order_id=order.id,
-            manager_id=order.manager_id,
-            warehouse_user_id=warehouse_user.id,
-            film_code=order.film_code,
-            panel_quantity=order.panel_quantity,
-            joint_type=order.joint_type,
-            joint_color=order.joint_color,
-            joint_quantity=order.joint_quantity,
-            glue_quantity=order.glue_quantity,
-            installation_required=order.installation_required,
-            customer_phone=order.customer_phone,
-            delivery_address=order.delivery_address
-        )
-        
-        # Меняем статус заказа на COMPLETED
-        order.status = OrderStatus.COMPLETED
-        order.completed_at = completed_order.completed_at  # Устанавливаем дату завершения
-        
-        # Сохраняем изменения
-        db.add(completed_order)
-        db.commit()
-        
-        # Отправляем уведомление менеджеру
-        manager = db.query(User).filter(User.id == order.manager_id).first()
-        if manager:
-            try:
-                await message.bot.send_message(
-                    chat_id=manager.telegram_id,
-                    text=(
-                        f"✅ Заказ #{order_id} отгружен!\n\n"
-                        f"Детали заказа:\n"
-                        f"🎨 Пленка: {order.film_code}, {order.panel_quantity} шт.\n"
-                        f"🔗 Стыки: {order.joint_color}, {order.joint_quantity} шт.\n"
-                        f"🧴 Клей: {order.glue_quantity} шт.\n"
-                        f"🔧 Монтаж: {'Требуется' if order.installation_required else 'Не требуется'}\n"
-                        f"📞 Телефон клиента: {order.customer_phone}\n"
-                        f"🚚 Адрес доставки: {order.delivery_address}"
-                    )
-                )
-            except Exception as e:
-                logging.error(f"Не удалось отправить уведомление менеджеру {manager.telegram_id}: {str(e)}")
-        
-        # Отправляем подтверждение складовщику
-        await message.answer(
-            f"✅ Заказ №{order_id} успешно отгружен и добавлен в список выполненных заказов.",
-            reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_MAIN)
-        )
-        
-    except Exception as e:
-        logging.error(f"Ошибка при подтверждении отгрузки заказа #{order_id}: {str(e)}")
-        await message.answer(
-            f"❌ Произошла ошибка при обработке заказа: {str(e)}",
-            reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_MAIN)
-        )
-    finally:
-        db.close()
-        await state.clear()
+    await process_order_shipment(message, order_id)
 
 @router.message(Command("confirm_order"))
 async def cmd_confirm_order(message: Message, state: FSMContext):
@@ -294,15 +169,50 @@ async def display_active_orders(message: Message):
             manager = db.query(User).filter(User.id == order.manager_id).first()
             manager_name = manager.username if manager else "Неизвестный менеджер"
             
+            # Формируем информацию о продуктах
+            products_info = ""
+            if order.products:
+                products_info = "🎨 Продукция:\n"
+                for product in order.products:
+                    film = db.query(Film).filter(Film.id == product.film_id).first()
+                    film_code = film.code if film else "Неизвестный"
+                    products_info += f"  • {film_code}, толщина {product.thickness} мм: {product.quantity} шт.\n"
+            else:
+                # Используем старое поле для обратной совместимости
+                products_info = f"🎨 Пленка: {order.film_code}, {order.panel_quantity} шт.\n"
+            
             # Формируем информацию о стыках
-            joint_info = "Нет" if not order.joint_quantity else f"{order.joint_type.value}, {order.joint_color}, {order.joint_quantity} шт."
+            joints_info = ""
+            if order.joints:
+                joints_info = "🔗 Стыки:\n"
+                for joint in order.joints:
+                    joint_type_text = ""
+                    if joint.joint_type == JointType.BUTTERFLY:
+                        joint_type_text = "Бабочка"
+                    elif joint.joint_type == JointType.SIMPLE:
+                        joint_type_text = "Простые"
+                    elif joint.joint_type == JointType.CLOSING:
+                        joint_type_text = "Замыкающие"
+                    joints_info += f"  • {joint_type_text}, {joint.joint_color}: {joint.quantity} шт.\n"
+            elif order.joint_quantity > 0:
+                # Используем старые поля для обратной совместимости
+                joint_type_text = ""
+                if order.joint_type == JointType.BUTTERFLY:
+                    joint_type_text = "Бабочка"
+                elif order.joint_type == JointType.SIMPLE:
+                    joint_type_text = "Простые"
+                elif order.joint_type == JointType.CLOSING:
+                    joint_type_text = "Замыкающие"
+                joints_info = f"🔗 Стыки: {joint_type_text}, {order.joint_color}: {order.joint_quantity} шт.\n"
+            else:
+                joints_info = "🔗 Стыки: Нет\n"
             
             response += (
                 f"📝 Заказ #{order.id}\n"
                 f"📆 Дата: {order.created_at.strftime('%d.%m.%Y %H:%M')}\n"
                 f"👤 Менеджер: {manager_name}\n"
-                f"🎨 Пленка: {order.film_code}, {order.panel_quantity} шт.\n"
-                f"🔗 Стыки: {joint_info}\n"
+                f"{products_info}"
+                f"{joints_info}"
                 f"🧴 Клей: {order.glue_quantity} шт.\n"
                 f"🔧 Монтаж: {'Требуется' if order.installation_required else 'Не требуется'}\n"
                 f"📞 Телефон: {order.customer_phone}\n"
@@ -347,11 +257,48 @@ async def handle_orders(message: Message, state: FSMContext):
             manager = db.query(User).filter(User.id == order.manager_id).first()
             manager_name = manager.username if manager else "Неизвестный менеджер"
             
+            # Формируем информацию о продуктах
+            products_info = ""
+            if order.products:
+                products_info = "- Продукция:\n"
+                for product in order.products:
+                    film = db.query(Film).filter(Film.id == product.film_id).first()
+                    film_code = film.code if film else "Неизвестный"
+                    products_info += f"  • {film_code}, толщина {product.thickness} мм: {product.quantity} шт.\n"
+            else:
+                # Используем старое поле для обратной совместимости
+                products_info = f"- Код пленки: {order.film_code}\n- Количество панелей: {order.panel_quantity} шт.\n"
+            
+            # Формируем информацию о стыках
+            joints_info = ""
+            if order.joints:
+                joints_info = "- Стыки:\n"
+                for joint in order.joints:
+                    joint_type_text = ""
+                    if joint.joint_type == JointType.BUTTERFLY:
+                        joint_type_text = "Бабочка"
+                    elif joint.joint_type == JointType.SIMPLE:
+                        joint_type_text = "Простые"
+                    elif joint.joint_type == JointType.CLOSING:
+                        joint_type_text = "Замыкающие"
+                    joints_info += f"  • {joint_type_text}, {joint.joint_color}: {joint.quantity} шт.\n"
+            elif order.joint_quantity > 0:
+                # Используем старые поля для обратной совместимости
+                joint_type_text = ""
+                if order.joint_type == JointType.BUTTERFLY:
+                    joint_type_text = "Бабочка"
+                elif order.joint_type == JointType.SIMPLE:
+                    joint_type_text = "Простые"
+                elif order.joint_type == JointType.CLOSING:
+                    joint_type_text = "Замыкающие"
+                joints_info = f"- Стыки: {joint_type_text}, {order.joint_color}: {order.joint_quantity} шт.\n"
+            else:
+                joints_info = "- Стыки: Нет\n"
+            
             response += (
                 f"📝 Заказ #{order.id}\n"
-                f"- Код пленки: {order.film_code}\n"
-                f"- Количество панелей: {order.panel_quantity} шт.\n"
-                f"- Стыки: {order.joint_color} ({order.joint_type.value}), {order.joint_quantity} шт.\n"
+                f"{products_info}"
+                f"{joints_info}"
                 f"- Клей: {order.glue_quantity} шт.\n"
                 f"- Монтаж: {'Требуется' if order.installation_required else 'Не требуется'}\n"
                 f"- Телефон клиента: {order.customer_phone}\n"
@@ -443,29 +390,68 @@ async def process_order_shipment(message: Message, order_id: int):
             )
             return
         
-        # Получаем информацию о материалах
-        finished_product = db.query(FinishedProduct).join(Film).filter(
-            Film.code == order.film_code,
-            FinishedProduct.thickness == order.panel_thickness  # Проверяем толщину
-        ).first()
-        
         # Проверяем наличие материалов
         missing_materials = []
         
-        if not finished_product or finished_product.quantity < order.panel_quantity:
-            available = finished_product.quantity if finished_product else 0
-            missing_materials.append(f"Пленка {order.film_code}: требуется {order.panel_quantity} шт., доступно {available} шт.")
+        # Проверяем продукты (новый способ через отношения)
+        if order.products:
+            for product in order.products:
+                if product.is_finished:
+                    # Проверяем наличие готовой продукции
+                    finished_product = db.query(FinishedProduct).filter(
+                        FinishedProduct.film_id == product.film_id,
+                        FinishedProduct.thickness == product.thickness
+                    ).first()
+                    
+                    film = db.query(Film).filter(Film.id == product.film_id).first()
+                    film_code = film.code if film else "Неизвестный"
+                    
+                    if not finished_product or finished_product.quantity < product.quantity:
+                        available = finished_product.quantity if finished_product else 0
+                        missing_materials.append(f"Продукция {film_code} (толщина {product.thickness} мм): требуется {product.quantity} шт., доступно {available} шт.")
+        else:
+            # Поддержка обратной совместимости для старого способа
+            finished_product = db.query(FinishedProduct).join(Film).filter(
+                Film.code == order.film_code,
+                FinishedProduct.thickness == order.panel_thickness
+            ).first()
+            
+            if not finished_product or finished_product.quantity < order.panel_quantity:
+                available = finished_product.quantity if finished_product else 0
+                missing_materials.append(f"Пленка {order.film_code}: требуется {order.panel_quantity} шт., доступно {available} шт.")
         
-        if order.joint_quantity > 0:
+        # Проверяем стыки (новый способ через отношения)
+        if order.joints:
+            for order_joint in order.joints:
+                joint = db.query(Joint).filter(
+                    Joint.type == order_joint.joint_type,
+                    Joint.color == order_joint.joint_color,
+                    Joint.thickness == order.panel_thickness  # Используем толщину из заказа
+                ).first()
+                
+                if not joint or joint.quantity < order_joint.quantity:
+                    available = joint.quantity if joint else 0
+                    joint_type_text = ""
+                    if order_joint.joint_type == JointType.BUTTERFLY:
+                        joint_type_text = "Бабочка"
+                    elif order_joint.joint_type == JointType.SIMPLE:
+                        joint_type_text = "Простые"
+                    elif order_joint.joint_type == JointType.CLOSING:
+                        joint_type_text = "Замыкающие"
+                    missing_materials.append(f"Стыки {joint_type_text}, {order_joint.joint_color}: требуется {order_joint.quantity} шт., доступно {available} шт.")
+        elif order.joint_quantity > 0:
+            # Поддержка обратной совместимости для старого способа
             joint = db.query(Joint).filter(
                 Joint.type == order.joint_type,
-                Joint.color == order.joint_color
+                Joint.color == order.joint_color,
+                Joint.thickness == order.panel_thickness
             ).first()
             
             if not joint or joint.quantity < order.joint_quantity:
                 available = joint.quantity if joint else 0
                 missing_materials.append(f"Стыки {order.joint_color}: требуется {order.joint_quantity} шт., доступно {available} шт.")
         
+        # Проверяем клей
         if order.glue_quantity > 0:
             glue = db.query(Glue).first()
             
@@ -485,19 +471,54 @@ async def process_order_shipment(message: Message, order_id: int):
         warehouse_user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
         
         # Списываем материалы
-        finished_product.quantity -= order.panel_quantity
+        if order.products:
+            for product in order.products:
+                if product.is_finished:
+                    finished_product = db.query(FinishedProduct).filter(
+                        FinishedProduct.film_id == product.film_id,
+                        FinishedProduct.thickness == product.thickness
+                    ).first()
+                    
+                    if finished_product:
+                        finished_product.quantity -= product.quantity
+        else:
+            # Поддержка обратной совместимости
+            finished_product = db.query(FinishedProduct).join(Film).filter(
+                Film.code == order.film_code,
+                FinishedProduct.thickness == order.panel_thickness
+            ).first()
+            
+            if finished_product:
+                finished_product.quantity -= order.panel_quantity
         
-        if order.joint_quantity > 0:
+        # Списываем стыки
+        if order.joints:
+            for order_joint in order.joints:
+                joint = db.query(Joint).filter(
+                    Joint.type == order_joint.joint_type,
+                    Joint.color == order_joint.joint_color,
+                    Joint.thickness == order.panel_thickness
+                ).first()
+                
+                if joint:
+                    joint.quantity -= order_joint.quantity
+        elif order.joint_quantity > 0:
+            # Поддержка обратной совместимости
             joint = db.query(Joint).filter(
                 Joint.type == order.joint_type,
-                Joint.color == order.joint_color
+                Joint.color == order.joint_color,
+                Joint.thickness == order.panel_thickness
             ).first()
-            joint.quantity -= order.joint_quantity
+            
+            if joint:
+                joint.quantity -= order.joint_quantity
         
+        # Списываем клей
         if order.glue_quantity > 0:
             glue = db.query(Glue).first()
-            glue.quantity -= order.glue_quantity
-            
+            if glue:
+                glue.quantity -= order.glue_quantity
+        
         # Создаем запись о выполненном заказе
         completed_order = CompletedOrder(
             order_id=order.id,
@@ -505,6 +526,7 @@ async def process_order_shipment(message: Message, order_id: int):
             warehouse_user_id=warehouse_user.id,
             film_code=order.film_code,
             panel_quantity=order.panel_quantity,
+            panel_thickness=order.panel_thickness,
             joint_type=order.joint_type,
             joint_color=order.joint_color,
             joint_quantity=order.joint_quantity,
@@ -513,6 +535,29 @@ async def process_order_shipment(message: Message, order_id: int):
             customer_phone=order.customer_phone,
             delivery_address=order.delivery_address
         )
+        
+        # Добавляем все продукты из заказа в выполненный заказ
+        if order.products:
+            for product in order.products:
+                film = db.query(Film).filter(Film.id == product.film_id).first()
+                if film:
+                    completed_order_film = CompletedOrderFilm(
+                        order_id=completed_order.id,
+                        film_code=film.code,
+                        quantity=product.quantity
+                    )
+                    db.add(completed_order_film)
+        
+        # Добавляем все стыки из заказа в выполненный заказ
+        if order.joints:
+            for order_joint in order.joints:
+                completed_order_joint = CompletedOrderJoint(
+                    order_id=completed_order.id,
+                    joint_type=order_joint.joint_type,
+                    joint_color=order_joint.joint_color,
+                    quantity=order_joint.quantity
+                )
+                db.add(completed_order_joint)
         
         # Меняем статус заказа на COMPLETED
         order.status = OrderStatus.COMPLETED
@@ -526,13 +571,45 @@ async def process_order_shipment(message: Message, order_id: int):
         manager = db.query(User).filter(User.id == order.manager_id).first()
         if manager:
             try:
+                # Формируем информацию о продуктах
+                products_info = ""
+                if order.products:
+                    for product in order.products:
+                        film = db.query(Film).filter(Film.id == product.film_id).first()
+                        film_code = film.code if film else "Неизвестный"
+                        products_info += f"- {film_code}, толщина {product.thickness} мм: {product.quantity} шт.\n"
+                else:
+                    products_info = f"- {order.film_code}: {order.panel_quantity} шт.\n"
+                
+                # Формируем информацию о стыках
+                joints_info = ""
+                if order.joints:
+                    for joint in order.joints:
+                        joint_type_text = ""
+                        if joint.joint_type == JointType.BUTTERFLY:
+                            joint_type_text = "Бабочка"
+                        elif joint.joint_type == JointType.SIMPLE:
+                            joint_type_text = "Простые"
+                        elif joint.joint_type == JointType.CLOSING:
+                            joint_type_text = "Замыкающие"
+                        joints_info += f"- {joint_type_text}, {joint.joint_color}: {joint.quantity} шт.\n"
+                elif order.joint_quantity > 0:
+                    joint_type_text = ""
+                    if order.joint_type == JointType.BUTTERFLY:
+                        joint_type_text = "Бабочка"
+                    elif order.joint_type == JointType.SIMPLE:
+                        joint_type_text = "Простые"
+                    elif order.joint_type == JointType.CLOSING:
+                        joint_type_text = "Замыкающие"
+                    joints_info = f"- {joint_type_text}, {order.joint_color}: {order.joint_quantity} шт.\n"
+                
                 await message.bot.send_message(
                     chat_id=manager.telegram_id,
                     text=(
                         f"✅ Заказ #{order_id} отгружен!\n\n"
                         f"Детали заказа:\n"
-                        f"🎨 Пленка: {order.film_code}, {order.panel_quantity} шт.\n"
-                        f"🔗 Стыки: {order.joint_color}, {order.joint_quantity} шт.\n"
+                        f"🎨 Продукция:\n{products_info}"
+                        f"🔗 Стыки:\n{joints_info if joints_info else 'Нет\n'}"
                         f"🧴 Клей: {order.glue_quantity} шт.\n"
                         f"🔧 Монтаж: {'Требуется' if order.installation_required else 'Не требуется'}\n"
                         f"📞 Телефон клиента: {order.customer_phone}\n"
