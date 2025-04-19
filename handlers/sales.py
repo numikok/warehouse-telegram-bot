@@ -13,12 +13,6 @@ from states import SalesStates
 
 router = Router()
 
-    current_film_code = State()
-    selected_products = State()
-    selected_joints = State()
-    waiting_for_add_more_joints = State()
-    waiting_for_order_more_joints = State()
-
 async def check_sales_access(message: Message) -> bool:
     db = next(get_db())
     try:
