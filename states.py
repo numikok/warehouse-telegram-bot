@@ -32,6 +32,7 @@ class ProductionStates(StatesGroup):
     waiting_for_defect_panel_thickness = State()
     waiting_for_defect_panel_quantity = State()
     waiting_for_defect_film_color = State()
+    waiting_for_defect_film_thickness = State()
     waiting_for_defect_film_meters = State()
     waiting_for_defect_glue_quantity = State()
     
@@ -68,6 +69,7 @@ class SalesStates(StatesGroup):
     waiting_for_film = State()
     waiting_for_film_code = State()
     waiting_for_film_name = State()
+    waiting_for_film_color = State()
     waiting_for_panel_quantity = State()
     
     # Состояния для множественного выбора продуктов
