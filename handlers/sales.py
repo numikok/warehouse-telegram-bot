@@ -825,17 +825,18 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                     )
                     
                     # Уменьшаем количество готовой продукции на складе
-                    finished_product.quantity -= qty
+                    # finished_product.quantity -= qty
                     
                     # Создаем операцию для готовой продукции
-                    operation = Operation(
-                        operation_type=OperationType.READY_PRODUCT_OUT.value,
-                        quantity=qty,
-                        user_id=manager_db_id, # Используем ID из базы
-                        details=json.dumps({"film_id": film.id, "film_code": film_code, "thickness": thickness})
-                    )
+                    # operation = Operation(
+                    #     operation_type=OperationType.READY_PRODUCT_OUT.value,
+                    #     quantity=qty,
+                    #     user_id=manager_db_id, # Используем ID из базы
+                    #     details=json.dumps({"film_id": film.id, "film_code": film_code, "thickness": thickness})
+                    # )
+                    # db.add(operation)
                     
-                    db.add(operation)
+                    db.add(order_item)
                 else:
                     # Если нет готовой продукции, создаем заказ на производство
                     order_item = OrderItem(
@@ -868,7 +869,6 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                     thickness = float(joint.get('thickness'))
                     color = joint.get('color')
                     joint_qty = joint.get('quantity')
-                    total_joints += joint_qty
                     
                     # Преобразуем строковое значение типа стыка обратно в enum
                     joint_type_enum = None
@@ -901,15 +901,15 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                         db.add(order_joint)
                         
                         # Уменьшаем количество стыков на складе
-                        joint.quantity -= joint_qty
+                        # joint.quantity -= joint_qty
                         
                         # Создаем операцию
-                        operation = Operation(
-                            operation_type=OperationType.JOINT_OUT.value,
-                            quantity=joint_qty,
-                            user_id=manager_db_id
-                        )
-                        db.add(operation)
+                        # operation = Operation(
+                        #     operation_type=OperationType.JOINT_OUT.value,
+                        #     quantity=joint_qty,
+                        #     user_id=manager_db_id
+                        # )
+                        # db.add(operation)
             
             # Обновляем общее количество стыков в заказе
             order.joint_quantity = total_joints
@@ -929,15 +929,15 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                     logging.info(f"DEBUG: Created OrderGlue with quantity {glue_quantity} for order {order.id}")
                     
                     # Уменьшаем количество клея на складе
-                    glue.quantity -= glue_quantity
+                    # glue.quantity -= glue_quantity
                     
                     # Создаем операцию
-                    operation = Operation(
-                        operation_type=OperationType.GLUE_OUT.value,
-                        quantity=glue_quantity,
-                        user_id=manager_db_id
-                    )
-                    db.add(operation)
+                    # operation = Operation(
+                    #     operation_type=OperationType.GLUE_OUT.value,
+                    #     quantity=glue_quantity,
+                    #     user_id=manager_db_id
+                    # )
+                    # db.add(operation)
                 else:
                     logging.warning(f"DEBUG: Not enough glue - required: {glue_quantity}, available: {glue.quantity if glue else 0}")
             
