@@ -280,6 +280,13 @@ class CompletedOrder(Base):
     customer_phone = Column(String, nullable=False)
     delivery_address = Column(String, nullable=False)
     completed_at = Column(DateTime(timezone=True), server_default=func.now())
+    film_code = Column(String, nullable=False, default="Неизвестно")  # Код пленки (для обратной совместимости)
+    panel_thickness = Column(Float, nullable=False, default=0.5)  # Толщина панели (для обратной совместимости)
+    panel_quantity = Column(Integer, nullable=False, default=0)  # Количество панелей (для обратной совместимости)
+    joint_type = Column(SQLEnum(JointType), nullable=True)  # Тип стыка (для обратной совместимости)
+    joint_color = Column(String, nullable=True)  # Цвет стыка (для обратной совместимости)
+    joint_quantity = Column(Integer, nullable=False, default=0)  # Количество стыков (для обратной совместимости)
+    glue_quantity = Column(Integer, nullable=False, default=0)  # Количество клея (для обратной совместимости)
     
     manager = relationship("User", foreign_keys=[manager_id])
     warehouse_user = relationship("User", foreign_keys=[warehouse_user_id])
