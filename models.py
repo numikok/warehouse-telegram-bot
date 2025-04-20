@@ -194,6 +194,31 @@ class Order(Base):
     joints = relationship("OrderJoint", back_populates="order", cascade="all, delete-orphan")
     glues = relationship("OrderGlue", back_populates="order", cascade="all, delete-orphan")
 
+    # Backward compatibility properties
+    @property
+    def glue_quantity(self):
+        return sum([glue.quantity for glue in self.glues]) if self.glues else 0
+        
+    @property
+    def joint_quantity(self):
+        return sum([joint.quantity for joint in self.joints]) if self.joints else 0
+    
+    @property
+    def joint_type(self):
+        return self.joints[0].joint_type if self.joints and len(self.joints) > 0 else None
+        
+    @property
+    def joint_color(self):
+        return self.joints[0].joint_color if self.joints and len(self.joints) > 0 else None
+        
+    @property
+    def film_code(self):
+        return self.products[0].color if self.products and len(self.products) > 0 else None
+        
+    @property
+    def panel_quantity(self):
+        return sum([item.quantity for item in self.products]) if self.products else 0
+
     def to_dict(self):
         joints_data = [{"type": joint.joint_type.value, "color": joint.joint_color, "quantity": joint.quantity, "thickness": joint.joint_thickness} for joint in self.joints] if self.joints else []
         items_data = [{"color": item.color, "thickness": item.thickness, "quantity": item.quantity} for item in self.products] if self.products else []

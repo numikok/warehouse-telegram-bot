@@ -175,33 +175,18 @@ async def display_active_orders(message: Message):
                 products_info = "🎨 Продукция:\n"
                 for product in order.products:
                     try:
-                        # Try to get the film information
-                        film = None
-                        film_code = "Неизвестный"
-                        if hasattr(product, 'film_id') and product.film_id:
-                            film = db.query(Film).filter(Film.id == product.film_id).first()
-                            if film and hasattr(film, 'code'):
-                                film_code = film.code
+                        # Базовая информация о продукте
+                        color = getattr(product, 'color', "Не указан")
+                        thickness = getattr(product, 'thickness', "Н/Д")
+                        quantity = getattr(product, 'quantity', 0)
                         
-                        # Get thickness and quantity with fallbacks
-                        thickness = product.thickness if hasattr(product, 'thickness') else "Н/Д"
-                        quantity = product.quantity if hasattr(product, 'quantity') else 0
-                        
-                        # Get color if available
-                        color_info = ""
-                        if hasattr(product, 'color') and product.color:
-                            color_info = f", цвет: {product.color}"
-                        
-                        # Build the product info string
-                        products_info += f"  • {film_code}{color_info}, толщина {thickness} мм: {quantity} шт.\n"
+                        products_info += f"  • Цвет: {color}, толщина {thickness} мм: {quantity} шт.\n"
                     except Exception as e:
                         logging.error(f"Error displaying product: {str(e)}")
-                        # Try to extract at least some info
+                        # Собираем всю доступную информацию
+                        product_desc = []
                         try:
-                            product_desc = []
-                            if hasattr(product, 'film_id'):
-                                product_desc.append(f"ID пленки: {product.film_id}")
-                            if hasattr(product, 'color'):
+                            if hasattr(product, 'color') and product.color:
                                 product_desc.append(f"цвет: {product.color}")
                             if hasattr(product, 'thickness'):
                                 product_desc.append(f"толщина: {product.thickness}")
@@ -236,7 +221,7 @@ async def display_active_orders(message: Message):
                 joints_info = "🔗 Стыки:\n"
                 for joint in order.joints:
                     try:
-                        joint_type_text = ""
+                        joint_type_text = "Не указан"
                         if hasattr(joint, 'joint_type'):
                             if joint.joint_type == JointType.BUTTERFLY:
                                 joint_type_text = "Бабочка"
@@ -245,16 +230,36 @@ async def display_active_orders(message: Message):
                             elif joint.joint_type == JointType.CLOSING:
                                 joint_type_text = "Замыкающие"
                         
-                        joint_color = joint.joint_color if hasattr(joint, 'joint_color') else "неизвестный"
-                        quantity = joint.quantity if hasattr(joint, 'quantity') else 0
-                        joints_info += f"  • {joint_type_text}, {joint_color}: {quantity} шт.\n"
-                    except:
-                        joints_info += "  • Неизвестный стык\n"
+                        joint_color = getattr(joint, 'joint_color', "Не указан")
+                        quantity = getattr(joint, 'quantity', 0)
+                        thickness = getattr(joint, 'joint_thickness', "Н/Д")
+                        
+                        joints_info += f"  • {joint_type_text}, цвет: {joint_color}, толщина: {thickness} мм: {quantity} шт.\n"
+                    except Exception as e:
+                        logging.error(f"Error displaying joint: {str(e)}")
+                        # Собираем всю доступную информацию
+                        joint_desc = []
+                        try:
+                            if hasattr(joint, 'joint_type'):
+                                joint_desc.append(f"тип: {joint.joint_type.value if hasattr(joint.joint_type, 'value') else joint.joint_type}")
+                            if hasattr(joint, 'joint_color'):
+                                joint_desc.append(f"цвет: {joint.joint_color}")
+                            if hasattr(joint, 'quantity'):
+                                joint_desc.append(f"кол-во: {joint.quantity}")
+                            if hasattr(joint, 'joint_thickness'):
+                                joint_desc.append(f"толщина: {joint.joint_thickness}")
+                                
+                            if joint_desc:
+                                joints_info += f"  • Стык ({', '.join(joint_desc)})\n"
+                            else:
+                                joints_info += "  • Неизвестный стык\n"
+                        except:
+                            joints_info += "  • Неизвестный стык\n"
             else:
                 # Пытаемся использовать устаревшие свойства, если они есть
                 try:
                     if hasattr(order, 'joint_quantity') and order.joint_quantity and order.joint_quantity > 0:
-                        joint_type_text = ""
+                        joint_type_text = "Не указан"
                         try:
                             if hasattr(order, 'joint_type'):
                                 if order.joint_type == JointType.BUTTERFLY:
@@ -266,7 +271,7 @@ async def display_active_orders(message: Message):
                         except:
                             pass
                             
-                        joint_color = ""
+                        joint_color = "Не указан"
                         try:
                             if hasattr(order, 'joint_color'):
                                 joint_color = order.joint_color
@@ -284,10 +289,11 @@ async def display_active_orders(message: Message):
             try:
                 if hasattr(order, 'glues') and order.glues:
                     for glue in order.glues:
-                        glue_quantity += glue.quantity if hasattr(glue, 'quantity') else 0
+                        glue_quantity += getattr(glue, 'quantity', 0)
                 elif hasattr(order, 'glue_quantity'):
                     glue_quantity = order.glue_quantity
-            except:
+            except Exception as e:
+                logging.error(f"Error getting glue quantity: {str(e)}")
                 glue_quantity = 0
             
             response += (
