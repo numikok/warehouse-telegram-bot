@@ -181,10 +181,6 @@ class Order(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     completed_at = Column(DateTime(timezone=True), nullable=True)
     
-    panel_quantity = Column(Integer, nullable=True)
-    panel_thickness = Column(Float, nullable=True)
-    joint_quantity = Column(Integer, nullable=True)
-    
     manager = relationship("User", foreign_keys=[manager_id])
     
     products = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan")
