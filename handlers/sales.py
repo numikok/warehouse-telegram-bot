@@ -758,6 +758,9 @@ async def process_order_confirmation(message: Message, state: FSMContext):
         installation_required = data.get("installation_required", False)
         glue_quantity = data.get("glue_quantity", 0)
         
+        # Debug logging for glue
+        logging.info(f"DEBUG: Order confirmation - need_glue: {need_glue}, glue_quantity: {glue_quantity}")
+        
         # Получаем telegram_id пользователя
         telegram_id = message.from_user.id
         
@@ -914,6 +917,7 @@ async def process_order_confirmation(message: Message, state: FSMContext):
             if need_glue and glue_quantity > 0:
                 # Получаем объект клея
                 glue = db.query(Glue).first()
+                logging.info(f"DEBUG: Checking for glue - found: {glue is not None}, glue_quantity needed: {glue_quantity}")
                 
                 if glue and glue.quantity >= glue_quantity:
                     # Связываем заказ с клеем
@@ -922,6 +926,7 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                         quantity=glue_quantity
                     )
                     db.add(order_glue)
+                    logging.info(f"DEBUG: Created OrderGlue with quantity {glue_quantity} for order {order.id}")
                     
                     # Уменьшаем количество клея на складе
                     glue.quantity -= glue_quantity
@@ -933,6 +938,8 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                         user_id=manager_db_id
                     )
                     db.add(operation)
+                else:
+                    logging.warning(f"DEBUG: Not enough glue - required: {glue_quantity}, available: {glue.quantity if glue else 0}")
             
             # Сохраняем изменения в базе данных
             db.commit()
@@ -1031,6 +1038,7 @@ async def process_need_glue(message: Message, state: FSMContext):
     if response == "✅ Да":
         # Пользователь хочет клей
         await state.update_data(need_glue=True)
+        logging.info(f"DEBUG: User {message.from_user.id} requested glue (need_glue=True)")
         
         # Запрашиваем количество клея
         # Проверяем наличие клея в базе
@@ -1065,6 +1073,7 @@ async def process_need_glue(message: Message, state: FSMContext):
     elif response == "❌ Нет":
         # Пользователь не хочет клей
         await state.update_data(need_glue=False, glue_quantity=0)
+        logging.info(f"DEBUG: User {message.from_user.id} did not request glue (need_glue=False, glue_quantity=0)")
         
         # Переходим к запросу о монтаже
         keyboard = ReplyKeyboardMarkup(
@@ -1100,6 +1109,7 @@ async def process_order_glue_quantity(message: Message, state: FSMContext):
         
         # Сохраняем количество клея
         await state.update_data(glue_quantity=glue_quantity)
+        logging.info(f"DEBUG: Saved glue_quantity={glue_quantity} to state for user {message.from_user.id}")
         
         # Переходим к запросу о монтаже
         await message.answer(
