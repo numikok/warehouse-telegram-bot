@@ -141,10 +141,19 @@ class OrderJoint(Base):
     order_id = Column(Integer, ForeignKey('orders.id', ondelete='CASCADE'), nullable=False)
     joint_type = Column(SQLEnum(JointType), nullable=False)
     joint_color = Column(String, nullable=False)
-    quantity = Column(Integer, nullable=False)
+    joint_quantity = Column(Integer, nullable=False)
     joint_thickness = Column(Float, nullable=False, default=0.5)  # Толщина стыка (0.5 или 0.8)
     
     order = relationship("Order", back_populates="joints")
+    
+    # Alias for backward compatibility
+    @property
+    def quantity(self):
+        return self.joint_quantity
+        
+    @quantity.setter
+    def quantity(self, value):
+        self.joint_quantity = value
 
 class OrderItem(Base):
     __tablename__ = "order_items"
