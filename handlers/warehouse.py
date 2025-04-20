@@ -462,7 +462,7 @@ async def process_order_shipment(message: Message, order_id: int):
                     try:
                         # Определяем необходимые атрибуты для CompletedOrderItem
                         item_data = {
-                            'completed_order_id': completed_order.id,
+                            'order_id': completed_order.id,
                             'quantity': getattr(product, 'quantity', 0),
                             'color': getattr(product, 'color', "Неизвестно"),
                             'thickness': getattr(product, 'thickness', 0.5)
@@ -477,6 +477,7 @@ async def process_order_shipment(message: Message, order_id: int):
                             # Создаем запись о выполненном товаре
                             completed_item = CompletedOrderItem(**item_data)
                             db.add(completed_item)
+                            logging.info(f"Добавлен товар в completed_order_items: {item_data}")
                             
                             # Списываем со склада
                             if film_id is not None:
@@ -498,7 +499,7 @@ async def process_order_shipment(message: Message, order_id: int):
                         
                         # Создаем запись о выполненном товаре
                         item_data = {
-                            'completed_order_id': completed_order.id,
+                            'order_id': completed_order.id,
                             'color': order.film_code,
                             'thickness': getattr(order, 'panel_thickness', 0.5),
                             'quantity': getattr(order, 'panel_quantity', 0)
@@ -510,6 +511,7 @@ async def process_order_shipment(message: Message, order_id: int):
                             
                         completed_item = CompletedOrderItem(**item_data)
                         db.add(completed_item)
+                        logging.info(f"Добавлен товар из старой структуры в completed_order_items: {item_data}")
                         
                         # Списываем со склада
                         if film:
@@ -524,10 +526,6 @@ async def process_order_shipment(message: Message, order_id: int):
                     logging.error(f"Ошибка при добавлении продукта из старой структуры: {str(e)}")
             
             # Добавляем информацию о стыках в выполненный заказ
-            joint_type = None
-            joint_color = None
-            joint_quantity = 0
-            
             if hasattr(order, 'joints') and order.joints:
                 for joint_item in order.joints:
                     try:
@@ -538,14 +536,17 @@ async def process_order_shipment(message: Message, order_id: int):
                         
                         if joint_type and joint_color and quantity > 0:
                             # Создаем запись о выполненном стыке
-                            completed_joint = CompletedOrderJoint(
-                                completed_order_id=completed_order.id,
-                                joint_type=joint_type,
-                                joint_color=joint_color,
-                                quantity=quantity,
-                                thickness=thickness
-                            )
+                            joint_data = {
+                                'order_id': completed_order.id,
+                                'joint_type': joint_type,
+                                'joint_color': joint_color,
+                                'quantity': quantity,
+                                'joint_thickness': thickness  # Используем правильное имя поля
+                            }
+                            
+                            completed_joint = CompletedOrderJoint(**joint_data)
                             db.add(completed_joint)
+                            logging.info(f"Добавлен стык в completed_order_joints: {joint_data}")
                             
                             # Списываем со склада
                             joint_db = db.query(Joint).filter(
@@ -568,14 +569,17 @@ async def process_order_shipment(message: Message, order_id: int):
                     
                     if joint_type and joint_color and joint_quantity > 0:
                         # Создаем запись о выполненном стыке
-                        completed_joint = CompletedOrderJoint(
-                            completed_order_id=completed_order.id,
-                            joint_type=joint_type,
-                            joint_color=joint_color,
-                            quantity=joint_quantity,
-                            thickness=getattr(order, 'panel_thickness', 0.5)
-                        )
+                        joint_data = {
+                            'order_id': completed_order.id,
+                            'joint_type': joint_type,
+                            'joint_color': joint_color,
+                            'quantity': joint_quantity,
+                            'joint_thickness': getattr(order, 'panel_thickness', 0.5)  # Используем правильное имя поля
+                        }
+                        
+                        completed_joint = CompletedOrderJoint(**joint_data)
                         db.add(completed_joint)
+                        logging.info(f"Добавлен стык из старой структуры в completed_order_joints: {joint_data}")
                         
                         # Списываем со склада
                         joint_db = db.query(Joint).filter(
@@ -603,11 +607,14 @@ async def process_order_shipment(message: Message, order_id: int):
             if glue_quantity > 0:
                 try:
                     # Создаем запись о выполненном клее
-                    completed_glue = CompletedOrderGlue(
-                        completed_order_id=completed_order.id,
-                        quantity=glue_quantity
-                    )
+                    glue_data = {
+                        'order_id': completed_order.id,
+                        'quantity': glue_quantity
+                    }
+                    
+                    completed_glue = CompletedOrderGlue(**glue_data)
                     db.add(completed_glue)
+                    logging.info(f"Добавлен клей в completed_order_glues: {glue_data}")
                     
                     # Списываем клей со склада
                     glue = db.query(Glue).first()
