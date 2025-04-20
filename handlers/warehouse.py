@@ -3,11 +3,12 @@ from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKey
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from models import User, UserRole, Film, Panel, Joint, Glue, Operation, FinishedProduct, Order, CompletedOrder, OrderStatus, JointType
+from models import User, UserRole, Film, Panel, Joint, Glue, Operation, FinishedProduct, Order, CompletedOrder, OrderStatus, JointType, CompletedOrderJoint, CompletedOrderItem, CompletedOrderGlue
 from database import get_db
 import json
 import logging
 from navigation import MenuState, get_menu_keyboard, go_back
+from datetime import datetime
 
 router = Router()
 
@@ -627,53 +628,162 @@ async def process_order_shipment(message: Message, order_id: int):
             if glue:
                 glue.quantity -= glue_quantity
         
-        # Создаем запись о выполненном заказе
-        completed_order = CompletedOrder(
-            order_id=order.id,
-            manager_id=order.manager_id,
-            warehouse_user_id=warehouse_user.id,
-            film_code=order.film_code,
-            panel_quantity=order.panel_quantity,
-            panel_thickness=order.panel_thickness,
-            joint_type=order.joint_type,
-            joint_color=order.joint_color,
-            joint_quantity=order.joint_quantity,
-            glue_quantity=order.glue_quantity,
-            installation_required=order.installation_required,
-            customer_phone=order.customer_phone,
-            delivery_address=order.delivery_address
-        )
-        
-        # Добавляем все продукты из заказа в выполненный заказ
-        if order.products:
-            for product in order.products:
-                film = db.query(Film).filter(Film.id == product.film_id).first()
-                if film:
-                    completed_order_film = CompletedOrderFilm(
+        try:
+            # Получаем необходимые значения с безопасными проверками атрибутов
+            # Определяем толщину панели
+            panel_thickness = None
+            if hasattr(order, 'products') and order.products and len(order.products) > 0:
+                try:
+                    # Берем толщину из первого продукта
+                    panel_thickness = getattr(order.products[0], 'thickness', None)
+                except Exception as e:
+                    logging.error(f"Ошибка при получении толщины панели из продуктов: {str(e)}")
+            
+            # Если в новой структуре толщина не найдена, пробуем старый атрибут
+            if panel_thickness is None and hasattr(order, 'panel_thickness'):
+                panel_thickness = order.panel_thickness
+            
+            # Если всё равно нет, используем значение по умолчанию
+            if panel_thickness is None:
+                panel_thickness = 0.5  # Значение по умолчанию
+                
+            # Аналогично для film_code
+            film_code = None
+            if hasattr(order, 'film_code'):
+                film_code = order.film_code
+            elif hasattr(order, 'products') and order.products and len(order.products) > 0:
+                try:
+                    # Используем цвет как film_code для новой структуры
+                    if hasattr(order.products[0], 'color'):
+                        film_code = order.products[0].color
+                except Exception as e:
+                    logging.error(f"Ошибка при получении film_code из продуктов: {str(e)}")
+            
+            if film_code is None:
+                film_code = "Неизвестно"
+            
+            # Получаем количество панелей
+            panel_quantity = 0
+            if hasattr(order, 'panel_quantity'):
+                panel_quantity = order.panel_quantity
+            elif hasattr(order, 'products') and order.products:
+                try:
+                    panel_quantity = sum([getattr(p, 'quantity', 0) for p in order.products])
+                except Exception as e:
+                    logging.error(f"Ошибка при получении количества панелей: {str(e)}")
+            
+            # Информация о стыках
+            joint_type = None
+            joint_color = None
+            joint_quantity = 0
+            
+            if hasattr(order, 'joints') and order.joints and len(order.joints) > 0:
+                try:
+                    joint_type = getattr(order.joints[0], 'joint_type', None)
+                    joint_color = getattr(order.joints[0], 'joint_color', None)
+                    joint_quantity = sum([getattr(j, 'quantity', 0) for j in order.joints])
+                except Exception as e:
+                    logging.error(f"Ошибка при получении информации о стыках: {str(e)}")
+            elif hasattr(order, 'joint_type') and hasattr(order, 'joint_color') and hasattr(order, 'joint_quantity'):
+                joint_type = order.joint_type
+                joint_color = order.joint_color
+                joint_quantity = order.joint_quantity
+            
+            # Проверяем необходимые атрибуты в схеме CompletedOrder
+            # Создаем словарь с безопасными значениями
+            completed_order_data = {
+                'order_id': order.id,
+                'manager_id': order.manager_id,
+                'warehouse_user_id': warehouse_user.id,
+                'installation_required': getattr(order, 'installation_required', False),
+                'customer_phone': getattr(order, 'customer_phone', ""),
+                'delivery_address': getattr(order, 'delivery_address', "")
+            }
+            
+            # Добавляем опциональные атрибуты, если они существуют в схеме CompletedOrder
+            if hasattr(CompletedOrder, 'panel_thickness'):
+                completed_order_data['panel_thickness'] = panel_thickness
+            
+            if hasattr(CompletedOrder, 'film_code'):
+                completed_order_data['film_code'] = film_code
+                
+            if hasattr(CompletedOrder, 'panel_quantity'):
+                completed_order_data['panel_quantity'] = panel_quantity
+                
+            if joint_type is not None and hasattr(CompletedOrder, 'joint_type'):
+                completed_order_data['joint_type'] = joint_type
+                
+            if joint_color is not None and hasattr(CompletedOrder, 'joint_color'):
+                completed_order_data['joint_color'] = joint_color
+                
+            if hasattr(CompletedOrder, 'joint_quantity'):
+                completed_order_data['joint_quantity'] = joint_quantity
+                
+            if hasattr(CompletedOrder, 'glue_quantity'):
+                completed_order_data['glue_quantity'] = glue_quantity
+            
+            # Создаем запись о выполненном заказе
+            completed_order = CompletedOrder(**completed_order_data)
+            db.add(completed_order)
+            db.flush()  # Получаем ID для создания связанных записей
+            
+            # Добавляем все продукты из заказа в выполненный заказ, если класс существует
+            if hasattr(order, 'products') and order.products:
+                for product in order.products:
+                    try:
+                        # Используем CompletedOrderItem, если он доступен
+                        if 'CompletedOrderItem' in globals():
+                            item = CompletedOrderItem(
+                                order_id=completed_order.id,
+                                color=getattr(product, 'color', "Неизвестно"),
+                                quantity=getattr(product, 'quantity', 0),
+                                thickness=getattr(product, 'thickness', 0.5)
+                            )
+                            db.add(item)
+                    except Exception as e:
+                        logging.error(f"Ошибка при добавлении продукта в завершенный заказ: {str(e)}")
+            
+            # Добавляем все стыки из заказа в выполненный заказ
+            if hasattr(order, 'joints') and order.joints:
+                for joint in order.joints:
+                    try:
+                        completed_joint = CompletedOrderJoint(
+                            order_id=completed_order.id,
+                            joint_type=getattr(joint, 'joint_type', JointType.SIMPLE),  # Значение по умолчанию
+                            joint_color=getattr(joint, 'joint_color', ""),
+                            quantity=getattr(joint, 'quantity', 0),
+                            joint_thickness=getattr(joint, 'joint_thickness', 0.5)
+                        )
+                        db.add(completed_joint)
+                    except Exception as e:
+                        logging.error(f"Ошибка при добавлении стыка в завершенный заказ: {str(e)}")
+                        
+            # Добавляем клей в завершенный заказ
+            if glue_quantity > 0 and 'CompletedOrderGlue' in globals():
+                try:
+                    completed_glue = CompletedOrderGlue(
                         order_id=completed_order.id,
-                        film_code=film.code,
-                        quantity=product.quantity
+                        quantity=glue_quantity
                     )
-                    db.add(completed_order_film)
+                    db.add(completed_glue)
+                except Exception as e:
+                    logging.error(f"Ошибка при добавлении клея в завершенный заказ: {str(e)}")
+            
+            # Меняем статус заказа на COMPLETED
+            order.status = OrderStatus.COMPLETED
+            order.completed_at = datetime.utcnow()
+            
+            # Сохраняем изменения
+            db.commit()
         
-        # Добавляем все стыки из заказа в выполненный заказ
-        if order.joints:
-            for order_joint in order.joints:
-                completed_order_joint = CompletedOrderJoint(
-                    order_id=completed_order.id,
-                    joint_type=order_joint.joint_type,
-                    joint_color=order_joint.joint_color,
-                    quantity=order_joint.quantity
-                )
-                db.add(completed_order_joint)
-        
-        # Меняем статус заказа на COMPLETED
-        order.status = OrderStatus.COMPLETED
-        order.completed_at = completed_order.completed_at  # Устанавливаем дату завершения
-        
-        # Сохраняем изменения
-        db.add(completed_order)
-        db.commit()
+        except Exception as e:
+            db.rollback()
+            logging.error(f"Ошибка при создании CompletedOrder: {str(e)}")
+            await message.answer(
+                f"❌ Произошла ошибка при обработке заказа: {str(e)}",
+                reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_MAIN)
+            )
+            return
         
         # Отправляем уведомление менеджеру
         manager = db.query(User).filter(User.id == order.manager_id).first()
