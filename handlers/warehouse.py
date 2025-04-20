@@ -230,97 +230,12 @@ async def display_active_orders(message: Message):
 
 @router.message(F.text == "📦 Мои заказы")
 async def handle_orders(message: Message, state: FSMContext):
+    """Обработка нажатия на кнопку 'Мои заказы'"""
     if not await check_warehouse_access(message):
         return
-        
-    db = next(get_db())
-    try:
-        state_data = await state.get_data()
-        is_admin_context = state_data.get("is_admin_context", False)
-        
-        # Получаем заказы со статусом "pending" или "in_progress"
-        orders = db.query(Order).filter(
-            Order.status.in_([OrderStatus.NEW, OrderStatus.IN_PROGRESS])
-        ).order_by(Order.created_at.desc()).all()
-        
-        if not orders:
-            await message.answer(
-                "Нет активных заказов.",
-                reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_ORDERS, is_admin_context)
-            )
-            return
-            
-        response = "📦 Активные заказы:\n\n"
-        
-        for order in orders:
-            # Получаем имя менеджера, создавшего заказ
-            manager = db.query(User).filter(User.id == order.manager_id).first()
-            manager_name = manager.username if manager else "Неизвестный менеджер"
-            
-            # Формируем информацию о продуктах
-            products_info = ""
-            if order.products:
-                products_info = "- Продукция:\n"
-                for product in order.products:
-                    film = db.query(Film).filter(Film.id == product.film_id).first()
-                    film_code = film.code if film else "Неизвестный"
-                    products_info += f"  • {film_code}, толщина {product.thickness} мм: {product.quantity} шт.\n"
-            else:
-                # Используем старое поле для обратной совместимости
-                products_info = f"- Код пленки: {order.film_code}\n- Количество панелей: {order.panel_quantity} шт.\n"
-            
-            # Формируем информацию о стыках
-            joints_info = ""
-            if order.joints:
-                joints_info = "- Стыки:\n"
-                for joint in order.joints:
-                    joint_type_text = ""
-                    if joint.joint_type == JointType.BUTTERFLY:
-                        joint_type_text = "Бабочка"
-                    elif joint.joint_type == JointType.SIMPLE:
-                        joint_type_text = "Простые"
-                    elif joint.joint_type == JointType.CLOSING:
-                        joint_type_text = "Замыкающие"
-                    joints_info += f"  • {joint_type_text}, {joint.joint_color}: {joint.quantity} шт.\n"
-            elif order.joint_quantity > 0:
-                # Используем старые поля для обратной совместимости
-                joint_type_text = ""
-                if order.joint_type == JointType.BUTTERFLY:
-                    joint_type_text = "Бабочка"
-                elif order.joint_type == JointType.SIMPLE:
-                    joint_type_text = "Простые"
-                elif order.joint_type == JointType.CLOSING:
-                    joint_type_text = "Замыкающие"
-                joints_info = f"- Стыки: {joint_type_text}, {order.joint_color}: {order.joint_quantity} шт.\n"
-            else:
-                joints_info = "- Стыки: Нет\n"
-            
-            response += (
-                f"📝 Заказ #{order.id}\n"
-                f"{products_info}"
-                f"{joints_info}"
-                f"- Клей: {order.glue_quantity} шт.\n"
-                f"- Монтаж: {'Требуется' if order.installation_required else 'Не требуется'}\n"
-                f"- Телефон клиента: {order.customer_phone}\n"
-                f"- Адрес доставки: {order.delivery_address}\n"
-                f"- Статус: {order.status.value}\n"
-                f"- Дата создания: {order.created_at.strftime('%d.%m.%Y %H:%M')}\n"
-                f"- Менеджер: {manager_name}\n\n"
-            )
-        
-        await message.answer(
-            response,
-            reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_ORDERS, is_admin_context)
-        )
-        
-        # Запрашиваем номер заказа для подтверждения отгрузки
-        await message.answer(
-            "Введите номер заказа для подтверждения отгрузки или нажмите 'Назад' для возврата в меню:",
-            reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_ORDERS, is_admin_context)
-        )
-        await state.set_state(WarehouseStates.waiting_for_order_id)
-    finally:
-        db.close()
+    
+    # Вызываем функцию для отображения активных заказов
+    await display_active_orders(message)
 
 @router.message(F.text == "📦 Остатки")
 async def handle_stock(message: Message, state: FSMContext):
