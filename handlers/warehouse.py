@@ -175,12 +175,45 @@ async def display_active_orders(message: Message):
                 products_info = "🎨 Продукция:\n"
                 for product in order.products:
                     try:
-                        film = db.query(Film).filter(Film.id == product.film_id).first()
-                        film_code = film.code if film else "Неизвестный"
-                        products_info += f"  • {film_code}, толщина {product.thickness} мм: {product.quantity} шт.\n"
-                    except AttributeError:
-                        # В случае отсутствия атрибутов просто добавляем запись без деталей
-                        products_info += "  • Неизвестная продукция\n"
+                        # Try to get the film information
+                        film = None
+                        film_code = "Неизвестный"
+                        if hasattr(product, 'film_id') and product.film_id:
+                            film = db.query(Film).filter(Film.id == product.film_id).first()
+                            if film and hasattr(film, 'code'):
+                                film_code = film.code
+                        
+                        # Get thickness and quantity with fallbacks
+                        thickness = product.thickness if hasattr(product, 'thickness') else "Н/Д"
+                        quantity = product.quantity if hasattr(product, 'quantity') else 0
+                        
+                        # Get color if available
+                        color_info = ""
+                        if hasattr(product, 'color') and product.color:
+                            color_info = f", цвет: {product.color}"
+                        
+                        # Build the product info string
+                        products_info += f"  • {film_code}{color_info}, толщина {thickness} мм: {quantity} шт.\n"
+                    except Exception as e:
+                        logging.error(f"Error displaying product: {str(e)}")
+                        # Try to extract at least some info
+                        try:
+                            product_desc = []
+                            if hasattr(product, 'film_id'):
+                                product_desc.append(f"ID пленки: {product.film_id}")
+                            if hasattr(product, 'color'):
+                                product_desc.append(f"цвет: {product.color}")
+                            if hasattr(product, 'thickness'):
+                                product_desc.append(f"толщина: {product.thickness}")
+                            if hasattr(product, 'quantity'):
+                                product_desc.append(f"кол-во: {product.quantity}")
+                                
+                            if product_desc:
+                                products_info += f"  • Продукция ({', '.join(product_desc)})\n"
+                            else:
+                                products_info += "  • Неизвестная продукция\n"
+                        except:
+                            products_info += "  • Неизвестная продукция\n"
             else:
                 # Пытаемся использовать устаревшие свойства, если они есть
                 try:
