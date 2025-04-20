@@ -171,43 +171,91 @@ async def display_active_orders(message: Message):
             
             # Формируем информацию о продуктах
             products_info = ""
-            if order.products:
+            if hasattr(order, 'products') and order.products:
                 products_info = "🎨 Продукция:\n"
                 for product in order.products:
-                    film = db.query(Film).filter(Film.id == product.film_id).first()
-                    film_code = film.code if film else "Неизвестный"
-                    products_info += f"  • {film_code}, толщина {product.thickness} мм: {product.quantity} шт.\n"
+                    try:
+                        film = db.query(Film).filter(Film.id == product.film_id).first()
+                        film_code = film.code if film else "Неизвестный"
+                        products_info += f"  • {film_code}, толщина {product.thickness} мм: {product.quantity} шт.\n"
+                    except AttributeError:
+                        # В случае отсутствия атрибутов просто добавляем запись без деталей
+                        products_info += "  • Неизвестная продукция\n"
             else:
-                # Проверяем, есть ли поле film_code (оно может быть None если нет products)
-                film_code = getattr(order, 'film_code', 'Неизвестный')
-                panel_quantity = getattr(order, 'panel_quantity', 0)
-                products_info = f"🎨 Пленка: {film_code or 'Неизвестный'}, {panel_quantity} шт.\n"
+                # Пытаемся использовать устаревшие свойства, если они есть
+                try:
+                    if hasattr(order, 'film_code') and order.film_code:
+                        panel_quantity = 0
+                        try:
+                            if hasattr(order, 'panel_quantity'):
+                                panel_quantity = order.panel_quantity
+                        except:
+                            pass
+                        products_info = f"🎨 Пленка: {order.film_code}, {panel_quantity} шт.\n"
+                    else:
+                        products_info = "🎨 Продукция: Не указана\n"
+                except:
+                    products_info = "🎨 Продукция: Не указана\n"
             
             # Формируем информацию о стыках
             joints_info = ""
-            if order.joints:
+            if hasattr(order, 'joints') and order.joints:
                 joints_info = "🔗 Стыки:\n"
                 for joint in order.joints:
-                    joint_type_text = ""
-                    if joint.joint_type == JointType.BUTTERFLY:
-                        joint_type_text = "Бабочка"
-                    elif joint.joint_type == JointType.SIMPLE:
-                        joint_type_text = "Простые"
-                    elif joint.joint_type == JointType.CLOSING:
-                        joint_type_text = "Замыкающие"
-                    joints_info += f"  • {joint_type_text}, {joint.joint_color}: {joint.quantity} шт.\n"
-            elif order.joint_quantity > 0:
-                # Используем старые поля для обратной совместимости
-                joint_type_text = ""
-                if order.joint_type == JointType.BUTTERFLY:
-                    joint_type_text = "Бабочка"
-                elif order.joint_type == JointType.SIMPLE:
-                    joint_type_text = "Простые"
-                elif order.joint_type == JointType.CLOSING:
-                    joint_type_text = "Замыкающие"
-                joints_info = f"🔗 Стыки: {joint_type_text}, {order.joint_color}: {order.joint_quantity} шт.\n"
+                    try:
+                        joint_type_text = ""
+                        if hasattr(joint, 'joint_type'):
+                            if joint.joint_type == JointType.BUTTERFLY:
+                                joint_type_text = "Бабочка"
+                            elif joint.joint_type == JointType.SIMPLE:
+                                joint_type_text = "Простые"
+                            elif joint.joint_type == JointType.CLOSING:
+                                joint_type_text = "Замыкающие"
+                        
+                        joint_color = joint.joint_color if hasattr(joint, 'joint_color') else "неизвестный"
+                        quantity = joint.quantity if hasattr(joint, 'quantity') else 0
+                        joints_info += f"  • {joint_type_text}, {joint_color}: {quantity} шт.\n"
+                    except:
+                        joints_info += "  • Неизвестный стык\n"
             else:
-                joints_info = "🔗 Стыки: Нет\n"
+                # Пытаемся использовать устаревшие свойства, если они есть
+                try:
+                    if hasattr(order, 'joint_quantity') and order.joint_quantity and order.joint_quantity > 0:
+                        joint_type_text = ""
+                        try:
+                            if hasattr(order, 'joint_type'):
+                                if order.joint_type == JointType.BUTTERFLY:
+                                    joint_type_text = "Бабочка"
+                                elif order.joint_type == JointType.SIMPLE:
+                                    joint_type_text = "Простые"
+                                elif order.joint_type == JointType.CLOSING:
+                                    joint_type_text = "Замыкающие"
+                        except:
+                            pass
+                            
+                        joint_color = ""
+                        try:
+                            if hasattr(order, 'joint_color'):
+                                joint_color = order.joint_color
+                        except:
+                            pass
+                            
+                        joints_info = f"🔗 Стыки: {joint_type_text}, {joint_color}: {order.joint_quantity} шт.\n"
+                    else:
+                        joints_info = "🔗 Стыки: Нет\n"
+                except:
+                    joints_info = "🔗 Стыки: Нет\n"
+            
+            # Получаем информацию о количестве клея
+            glue_quantity = 0
+            try:
+                if hasattr(order, 'glues') and order.glues:
+                    for glue in order.glues:
+                        glue_quantity += glue.quantity if hasattr(glue, 'quantity') else 0
+                elif hasattr(order, 'glue_quantity'):
+                    glue_quantity = order.glue_quantity
+            except:
+                glue_quantity = 0
             
             response += (
                 f"📝 Заказ #{order.id}\n"
@@ -215,7 +263,7 @@ async def display_active_orders(message: Message):
                 f"👤 Менеджер: {manager_name}\n"
                 f"{products_info}"
                 f"{joints_info}"
-                f"🧴 Клей: {order.glue_quantity} шт.\n"
+                f"🧴 Клей: {glue_quantity} шт.\n"
                 f"🔧 Монтаж: {'Требуется' if order.installation_required else 'Не требуется'}\n"
                 f"📞 Телефон: {order.customer_phone}\n"
                 f"🚚 Адрес: {order.delivery_address}\n"
@@ -310,79 +358,118 @@ async def process_order_shipment(message: Message, order_id: int):
         # Проверяем наличие материалов
         missing_materials = []
         
-        # Проверяем продукты (новый способ через отношения)
-        if order.products:
+        # Проверяем продукты
+        if hasattr(order, 'products') and order.products:
             for product in order.products:
-                if product.is_finished:
-                    # Проверяем наличие готовой продукции
-                    finished_product = db.query(FinishedProduct).filter(
-                        FinishedProduct.film_id == product.film_id,
-                        FinishedProduct.thickness == product.thickness
-                    ).first()
+                try:
+                    film_id = product.film_id if hasattr(product, 'film_id') else None
+                    thickness = product.thickness if hasattr(product, 'thickness') else None
+                    quantity = product.quantity if hasattr(product, 'quantity') else 0
                     
-                    film = db.query(Film).filter(Film.id == product.film_id).first()
-                    film_code = film.code if film else "Неизвестный"
-                    
-                    if not finished_product or finished_product.quantity < product.quantity:
-                        available = finished_product.quantity if finished_product else 0
-                        missing_materials.append(f"Продукция {film_code} (толщина {product.thickness} мм): требуется {product.quantity} шт., доступно {available} шт.")
+                    if film_id is not None and thickness is not None and quantity > 0:
+                        finished_product = db.query(FinishedProduct).filter(
+                            FinishedProduct.film_id == film_id,
+                            FinishedProduct.thickness == thickness
+                        ).first()
+                        
+                        film = db.query(Film).filter(Film.id == film_id).first()
+                        film_code = film.code if film else "Неизвестный"
+                        
+                        if not finished_product or finished_product.quantity < quantity:
+                            available = finished_product.quantity if finished_product else 0
+                            missing_materials.append(f"Продукция {film_code} (толщина {thickness} мм): требуется {quantity} шт., доступно {available} шт.")
+                except:
+                    continue
         else:
-            # Поддержка обратной совместимости для старого способа
+            # Попытка использовать старые свойства для обратной совместимости
             try:
-                film_code = order.film_code
-                panel_thickness = order.panel_thickness
-                panel_quantity = order.panel_quantity
-                
-                if film_code is not None and panel_thickness is not None and panel_quantity > 0:
-                    finished_product = db.query(FinishedProduct).join(Film).filter(
-                        Film.code == film_code,
-                        FinishedProduct.thickness == panel_thickness
-                    ).first()
+                if hasattr(order, 'film_code') and hasattr(order, 'panel_thickness') and hasattr(order, 'panel_quantity'):
+                    film_code = order.film_code
+                    panel_thickness = order.panel_thickness
+                    panel_quantity = order.panel_quantity
                     
-                    if finished_product:
-                        finished_product.quantity -= panel_quantity
-            except (AttributeError, IndexError):
-                # Пропускаем, если атрибуты отсутствуют
+                    if film_code and panel_thickness and panel_quantity > 0:
+                        finished_product = db.query(FinishedProduct).join(Film).filter(
+                            Film.code == film_code,
+                            FinishedProduct.thickness == panel_thickness
+                        ).first()
+                        
+                        if not finished_product or finished_product.quantity < panel_quantity:
+                            available = finished_product.quantity if finished_product else 0
+                            missing_materials.append(f"Пленка {film_code}: требуется {panel_quantity} шт., доступно {available} шт.")
+            except:
                 pass
         
-        # Проверяем стыки (новый способ через отношения)
-        if order.joints:
-            for order_joint in order.joints:
-                joint = db.query(Joint).filter(
-                    Joint.type == order_joint.joint_type,
-                    Joint.color == order_joint.joint_color,
-                    Joint.thickness == order.panel_thickness  # Используем толщину из заказа
-                ).first()
+        # Проверяем стыки
+        if hasattr(order, 'joints') and order.joints:
+            for joint in order.joints:
+                try:
+                    joint_type = joint.joint_type if hasattr(joint, 'joint_type') else None
+                    joint_color = joint.joint_color if hasattr(joint, 'joint_color') else None
+                    joint_quantity = joint.quantity if hasattr(joint, 'quantity') else 0
+                    
+                    # Определяем толщину стыка
+                    joint_thickness = joint.joint_thickness if hasattr(joint, 'joint_thickness') else None
+                    if joint_thickness is None and hasattr(order, 'products') and order.products:
+                        try:
+                            joint_thickness = order.products[0].thickness if hasattr(order.products[0], 'thickness') else None
+                        except:
+                            pass
+                    
+                    if joint_type and joint_color and joint_quantity > 0 and joint_thickness:
+                        joint_db = db.query(Joint).filter(
+                            Joint.type == joint_type,
+                            Joint.color == joint_color,
+                            Joint.thickness == joint_thickness
+                        ).first()
+                        
+                        if not joint_db or joint_db.quantity < joint_quantity:
+                            available = joint_db.quantity if joint_db else 0
+                            joint_type_text = ""
+                            if joint_type == JointType.BUTTERFLY:
+                                joint_type_text = "Бабочка"
+                            elif joint_type == JointType.SIMPLE:
+                                joint_type_text = "Простые"
+                            elif joint_type == JointType.CLOSING:
+                                joint_type_text = "Замыкающие"
+                            missing_materials.append(f"Стыки {joint_type_text}, {joint_color}: требуется {joint_quantity} шт., доступно {available} шт.")
+                except:
+                    continue
+        else:
+            # Попытка использовать старые свойства
+            try:
+                if hasattr(order, 'joint_quantity') and hasattr(order, 'joint_type') and hasattr(order, 'joint_color') and hasattr(order, 'panel_thickness'):
+                    if order.joint_quantity > 0:
+                        joint = db.query(Joint).filter(
+                            Joint.type == order.joint_type,
+                            Joint.color == order.joint_color,
+                            Joint.thickness == order.panel_thickness
+                        ).first()
+                        
+                        if not joint or joint.quantity < order.joint_quantity:
+                            available = joint.quantity if joint else 0
+                            missing_materials.append(f"Стыки {order.joint_color}: требуется {order.joint_quantity} шт., доступно {available} шт.")
+            except:
+                pass
                 
-                if not joint or joint.quantity < order_joint.quantity:
-                    available = joint.quantity if joint else 0
-                    joint_type_text = ""
-                    if order_joint.joint_type == JointType.BUTTERFLY:
-                        joint_type_text = "Бабочка"
-                    elif order_joint.joint_type == JointType.SIMPLE:
-                        joint_type_text = "Простые"
-                    elif order_joint.joint_type == JointType.CLOSING:
-                        joint_type_text = "Замыкающие"
-                    missing_materials.append(f"Стыки {joint_type_text}, {order_joint.joint_color}: требуется {order_joint.quantity} шт., доступно {available} шт.")
-        elif order.joint_quantity > 0:
-            # Поддержка обратной совместимости для старого способа
-            joint = db.query(Joint).filter(
-                Joint.type == order.joint_type,
-                Joint.color == order.joint_color,
-                Joint.thickness == order.panel_thickness
-            ).first()
-            
-            if not joint or joint.quantity < order.joint_quantity:
-                available = joint.quantity if joint else 0
-                missing_materials.append(f"Стыки {order.joint_color}: требуется {order.joint_quantity} шт., доступно {available} шт.")
-        
         # Проверяем клей
-        if order.glue_quantity > 0:
+        glue_quantity = 0
+        try:
+            if hasattr(order, 'glues') and order.glues:
+                for glue_item in order.glues:
+                    if hasattr(glue_item, 'quantity'):
+                        glue_quantity += glue_item.quantity
+            elif hasattr(order, 'glue_quantity'):
+                glue_quantity = order.glue_quantity
+        except:
+            glue_quantity = 0
+            
+        if glue_quantity > 0:
             glue = db.query(Glue).first()
             
-            if not glue or glue.quantity < order.glue_quantity:
+            if not glue or glue.quantity < glue_quantity:
                 available = glue.quantity if glue else 0
-                missing_materials.append(f"Клей: требуется {order.glue_quantity} шт., доступно {available} шт.")
+                missing_materials.append(f"Клей: требуется {glue_quantity} шт., доступно {available} шт.")
         
         # Если не хватает материалов, сообщаем об этом
         if missing_materials:
@@ -396,62 +483,101 @@ async def process_order_shipment(message: Message, order_id: int):
         warehouse_user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
         
         # Списываем материалы
-        if order.products:
+        if hasattr(order, 'products') and order.products:
             for product in order.products:
-                if product.is_finished:
-                    finished_product = db.query(FinishedProduct).filter(
-                        FinishedProduct.film_id == product.film_id,
-                        FinishedProduct.thickness == product.thickness
-                    ).first()
+                try:
+                    film_id = product.film_id if hasattr(product, 'film_id') else None
+                    thickness = product.thickness if hasattr(product, 'thickness') else None
+                    quantity = product.quantity if hasattr(product, 'quantity') else 0
                     
-                    if finished_product:
-                        finished_product.quantity -= product.quantity
+                    if film_id is not None and thickness is not None and quantity > 0:
+                        finished_product = db.query(FinishedProduct).filter(
+                            FinishedProduct.film_id == film_id,
+                            FinishedProduct.thickness == thickness
+                        ).first()
+                        
+                        if finished_product:
+                            finished_product.quantity -= quantity
+                except:
+                    continue
         else:
-            # Поддержка обратной совместимости
+            # Попытка использовать старые свойства для обратной совместимости
             try:
-                film_code = order.film_code
-                panel_thickness = order.panel_thickness
-                panel_quantity = order.panel_quantity
-                
-                if film_code is not None and panel_thickness is not None and panel_quantity > 0:
-                    finished_product = db.query(FinishedProduct).join(Film).filter(
-                        Film.code == film_code,
-                        FinishedProduct.thickness == panel_thickness
-                    ).first()
+                if hasattr(order, 'film_code') and hasattr(order, 'panel_thickness') and hasattr(order, 'panel_quantity'):
+                    film_code = order.film_code
+                    panel_thickness = order.panel_thickness
+                    panel_quantity = order.panel_quantity
                     
-                    if finished_product:
-                        finished_product.quantity -= panel_quantity
-            except (AttributeError, IndexError):
-                # Пропускаем, если атрибуты отсутствуют
+                    if film_code and panel_thickness and panel_quantity > 0:
+                        finished_product = db.query(FinishedProduct).join(Film).filter(
+                            Film.code == film_code,
+                            FinishedProduct.thickness == panel_thickness
+                        ).first()
+                        
+                        if finished_product:
+                            finished_product.quantity -= panel_quantity
+            except:
                 pass
         
         # Списываем стыки
-        if order.joints:
-            for order_joint in order.joints:
-                joint = db.query(Joint).filter(
-                    Joint.type == order_joint.joint_type,
-                    Joint.color == order_joint.joint_color,
-                    Joint.thickness == order.panel_thickness
-                ).first()
-                
-                if joint:
-                    joint.quantity -= order_joint.quantity
-        elif order.joint_quantity > 0:
-            # Поддержка обратной совместимости
-            joint = db.query(Joint).filter(
-                Joint.type == order.joint_type,
-                Joint.color == order.joint_color,
-                Joint.thickness == order.panel_thickness
-            ).first()
-            
-            if joint:
-                joint.quantity -= order.joint_quantity
+        if hasattr(order, 'joints') and order.joints:
+            for joint in order.joints:
+                try:
+                    joint_type = joint.joint_type if hasattr(joint, 'joint_type') else None
+                    joint_color = joint.joint_color if hasattr(joint, 'joint_color') else None
+                    joint_quantity = joint.quantity if hasattr(joint, 'quantity') else 0
+                    
+                    # Определяем толщину стыка
+                    joint_thickness = joint.joint_thickness if hasattr(joint, 'joint_thickness') else None
+                    if joint_thickness is None and hasattr(order, 'products') and order.products:
+                        try:
+                            joint_thickness = order.products[0].thickness if hasattr(order.products[0], 'thickness') else None
+                        except:
+                            pass
+                    
+                    if joint_type and joint_color and joint_quantity > 0 and joint_thickness:
+                        joint_db = db.query(Joint).filter(
+                            Joint.type == joint_type,
+                            Joint.color == joint_color,
+                            Joint.thickness == joint_thickness
+                        ).first()
+                        
+                        if joint_db:
+                            joint_db.quantity -= joint_quantity
+                except:
+                    continue
+        else:
+            # Попытка использовать старые свойства
+            try:
+                if hasattr(order, 'joint_quantity') and hasattr(order, 'joint_type') and hasattr(order, 'joint_color') and hasattr(order, 'panel_thickness'):
+                    if order.joint_quantity > 0:
+                        joint = db.query(Joint).filter(
+                            Joint.type == order.joint_type,
+                            Joint.color == order.joint_color,
+                            Joint.thickness == order.panel_thickness
+                        ).first()
+                        
+                        if joint:
+                            joint.quantity -= order.joint_quantity
+            except:
+                pass
         
         # Списываем клей
-        if order.glue_quantity > 0:
+        glue_quantity = 0
+        try:
+            if hasattr(order, 'glues') and order.glues:
+                for glue_item in order.glues:
+                    if hasattr(glue_item, 'quantity'):
+                        glue_quantity += glue_item.quantity
+            elif hasattr(order, 'glue_quantity'):
+                glue_quantity = order.glue_quantity
+        except:
+            glue_quantity = 0
+            
+        if glue_quantity > 0:
             glue = db.query(Glue).first()
             if glue:
-                glue.quantity -= order.glue_quantity
+                glue.quantity -= glue_quantity
         
         # Создаем запись о выполненном заказе
         completed_order = CompletedOrder(
