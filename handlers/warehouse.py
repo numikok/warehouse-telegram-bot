@@ -419,7 +419,7 @@ async def process_order_shipment(message: Message, order_id: int):
         
         # Инициализируем переменные, которые будут использоваться для создания CompletedOrder
         panel_thickness = 0.5  # значение по умолчанию
-        film_code = "Неизвестно"
+        film_code = "Неизвестно"  # Значение по умолчанию, всегда должно быть заполнено
         panel_quantity = 0
         joint_type = None
         joint_color = None
@@ -433,19 +433,24 @@ async def process_order_shipment(message: Message, order_id: int):
                 first_product = order.products[0]
                 panel_thickness = getattr(first_product, 'thickness', 0.5)
                 panel_quantity = sum(getattr(product, 'quantity', 0) for product in order.products)
+                
+                # Для film_code используем один из двух возможных подходов: либо через film_id, либо через color
                 film = None
-                if hasattr(first_product, 'film_id'):
+                if hasattr(first_product, 'film_id') and first_product.film_id is not None:
                     film = db.query(Film).filter(Film.id == first_product.film_id).first()
-                if film:
-                    film_code = film.code
-                else:
-                    film_code = getattr(first_product, 'color', "Неизвестно")
+                    if film:
+                        film_code = film.code
+                
+                # Если film_id не существует или не найден в базе, используем поле color
+                if film_code == "Неизвестно" and hasattr(first_product, 'color') and first_product.color:
+                    film_code = first_product.color
             except Exception as e:
                 logging.error(f"Ошибка при извлечении данных о продуктах: {str(e)}")
         else:
             # Если нет products, пробуем получить атрибуты напрямую из заказа (старая структура)
             panel_thickness = getattr(order, 'panel_thickness', 0.5)
-            film_code = getattr(order, 'film_code', "Неизвестно")
+            if hasattr(order, 'film_code') and order.film_code:
+                film_code = order.film_code
             panel_quantity = getattr(order, 'panel_quantity', 0)
         
         # Проверяем наличие стыков и извлекаем данные
@@ -475,23 +480,27 @@ async def process_order_shipment(message: Message, order_id: int):
             glue_quantity = getattr(order, 'glue_quantity', 0)
         
         try:
-            # Подготавливаем данные для CompletedOrder
+            # Проверим структуру CompletedOrder, чтобы определить обязательные поля
+            required_fields = {}
+            for column in CompletedOrder.__table__.columns:
+                if not column.nullable and column.name not in ['id', 'completed_at'] and not column.default:
+                    required_fields[column.name] = True
+            
+            # Подготавливаем данные для CompletedOrder с учетом обязательных полей
             completed_order_data = {
                 'order_id': order.id,
                 'manager_id': order.manager_id,
                 'warehouse_user_id': warehouse_user.id,
                 'installation_required': getattr(order, 'installation_required', False),
-                'customer_phone': getattr(order, 'customer_phone', ""),
-                'delivery_address': getattr(order, 'delivery_address', "")
+                'customer_phone': getattr(order, 'customer_phone', "") or "Не указан",
+                'delivery_address': getattr(order, 'delivery_address', "") or "Не указан",
+                # Всегда добавляем film_code, так как он обязателен по схеме БД
+                'film_code': film_code,
+                # Также добавляем другие поля, которые могут быть обязательными
+                'panel_thickness': panel_thickness
             }
             
-            # Добавляем опциональные атрибуты, если они существуют в схеме CompletedOrder
-            if hasattr(CompletedOrder, 'panel_thickness'):
-                completed_order_data['panel_thickness'] = panel_thickness
-            
-            if hasattr(CompletedOrder, 'film_code'):
-                completed_order_data['film_code'] = film_code
-                
+            # Добавляем остальные необязательные поля, если они существуют в схеме
             if hasattr(CompletedOrder, 'panel_quantity'):
                 completed_order_data['panel_quantity'] = panel_quantity
                 
@@ -507,7 +516,27 @@ async def process_order_shipment(message: Message, order_id: int):
             if hasattr(CompletedOrder, 'glue_quantity'):
                 completed_order_data['glue_quantity'] = glue_quantity
             
+            # Проверяем, что все обязательные поля включены
+            for field in required_fields:
+                if field not in completed_order_data:
+                    logging.warning(f"Обязательное поле {field} отсутствует в данных. Устанавливаем значение по умолчанию.")
+                    if field == 'film_code':
+                        completed_order_data[field] = "Неизвестно"
+                    elif field == 'customer_phone':
+                        completed_order_data[field] = "Не указан"
+                    elif field == 'delivery_address':
+                        completed_order_data[field] = "Не указан"
+                    elif field == 'panel_thickness':
+                        completed_order_data[field] = 0.5
+                    elif field == 'joint_color':
+                        completed_order_data[field] = ""
+                    elif field == 'joint_quantity' or field == 'panel_quantity' or field == 'glue_quantity':
+                        completed_order_data[field] = 0
+                    else:
+                        completed_order_data[field] = None
+            
             # Создаем запись о выполненном заказе
+            logging.info(f"Создаем CompletedOrder с данными: {completed_order_data}")
             completed_order = CompletedOrder(**completed_order_data)
             db.add(completed_order)
             db.flush()  # Получаем ID созданного заказа
@@ -516,28 +545,33 @@ async def process_order_shipment(message: Message, order_id: int):
             if hasattr(order, 'products') and order.products:
                 for product in order.products:
                     try:
-                        film_id = getattr(product, 'film_id', None)
-                        thickness = getattr(product, 'thickness', None)
-                        quantity = getattr(product, 'quantity', 0)
+                        # Определяем необходимые атрибуты для CompletedOrderItem
+                        item_data = {
+                            'completed_order_id': completed_order.id,
+                            'quantity': getattr(product, 'quantity', 0),
+                            'color': getattr(product, 'color', film_code),  # Используем film_code как запасной вариант
+                            'thickness': getattr(product, 'thickness', panel_thickness)
+                        }
                         
-                        if film_id is not None and thickness is not None and quantity > 0:
+                        # Проверяем наличие film_id и добавляем его, если он есть
+                        film_id = getattr(product, 'film_id', None)
+                        if film_id is not None and hasattr(CompletedOrderItem, 'film_id'):
+                            item_data['film_id'] = film_id
+                        
+                        if item_data['quantity'] > 0:
                             # Создаем запись о выполненном товаре
-                            completed_item = CompletedOrderItem(
-                                completed_order_id=completed_order.id,
-                                film_id=film_id,
-                                thickness=thickness,
-                                quantity=quantity
-                            )
+                            completed_item = CompletedOrderItem(**item_data)
                             db.add(completed_item)
                             
                             # Списываем со склада
-                            finished_product = db.query(FinishedProduct).filter(
-                                FinishedProduct.film_id == film_id,
-                                FinishedProduct.thickness == thickness
-                            ).first()
-                            
-                            if finished_product:
-                                finished_product.quantity -= quantity
+                            if film_id is not None:
+                                finished_product = db.query(FinishedProduct).filter(
+                                    FinishedProduct.film_id == film_id,
+                                    FinishedProduct.thickness == item_data['thickness']
+                                ).first()
+                                
+                                if finished_product:
+                                    finished_product.quantity -= item_data['quantity']
                     except Exception as e:
                         logging.error(f"Ошибка при добавлении продукта в выполненный заказ: {str(e)}")
             else:
@@ -546,17 +580,24 @@ async def process_order_shipment(message: Message, order_id: int):
                     if film_code != "Неизвестно" and panel_thickness > 0 and panel_quantity > 0:
                         # Находим пленку по коду
                         film = db.query(Film).filter(Film.code == film_code).first()
-                        if film:
-                            # Создаем запись о выполненном товаре
-                            completed_item = CompletedOrderItem(
-                                completed_order_id=completed_order.id,
-                                film_id=film.id,
-                                thickness=panel_thickness,
-                                quantity=panel_quantity
-                            )
-                            db.add(completed_item)
+                        
+                        # Создаем запись о выполненном товаре
+                        item_data = {
+                            'completed_order_id': completed_order.id,
+                            'color': film_code,
+                            'thickness': panel_thickness,
+                            'quantity': panel_quantity
+                        }
+                        
+                        # Добавляем film_id, если он существует
+                        if film and hasattr(CompletedOrderItem, 'film_id'):
+                            item_data['film_id'] = film.id
                             
-                            # Списываем со склада
+                        completed_item = CompletedOrderItem(**item_data)
+                        db.add(completed_item)
+                        
+                        # Списываем со склада
+                        if film:
                             finished_product = db.query(FinishedProduct).filter(
                                 FinishedProduct.film_id == film.id,
                                 FinishedProduct.thickness == panel_thickness
@@ -573,8 +614,8 @@ async def process_order_shipment(message: Message, order_id: int):
                     try:
                         joint_type = getattr(joint_item, 'joint_type', None)
                         joint_color = getattr(joint_item, 'joint_color', None)
-                        quantity = getattr(joint_item, 'quantity', 0)
-                        thickness = getattr(joint_item, 'thickness', panel_thickness)  # Используем толщину панели если нет
+                        thickness = getattr(joint_item, 'joint_thickness', panel_thickness)
+                        quantity = getattr(joint_item, 'quantity', getattr(joint_item, 'joint_quantity', 0))
                         
                         if joint_type and joint_color and quantity > 0:
                             # Создаем запись о выполненном стыке
@@ -642,6 +683,7 @@ async def process_order_shipment(message: Message, order_id: int):
             
             # Меняем статус заказа на выполненный
             order.status = OrderStatus.COMPLETED
+            order.completed_at = datetime.utcnow()
             
             # Сохраняем изменения в базе данных
             db.commit()
