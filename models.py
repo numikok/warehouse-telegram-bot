@@ -173,28 +173,34 @@ class Order(Base):
     
     id = Column(Integer, primary_key=True)
     manager_id = Column(Integer, ForeignKey('users.id'), nullable=False)
-    installation_required = Column(Boolean, default=False)  # Требуется ли монтаж
-    customer_phone = Column(String, nullable=False)  # Телефон клиента
-    delivery_address = Column(String, nullable=False)  # Адрес доставки
+    installation_required = Column(Boolean, default=False)
+    customer_phone = Column(String, nullable=True)
+    delivery_address = Column(String, nullable=True)
     status = Column(SQLEnum(OrderStatus), nullable=False, default=OrderStatus.NEW)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     completed_at = Column(DateTime(timezone=True), nullable=True)
     
+    panel_quantity = Column(Integer, nullable=True)
+    panel_thickness = Column(Float, nullable=True)
+    joint_quantity = Column(Integer, nullable=True)
+    
     manager = relationship("User", foreign_keys=[manager_id])
+    
+    products = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan")
     joints = relationship("OrderJoint", back_populates="order", cascade="all, delete-orphan")
-    items = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan")
-    glues = relationship("OrderGlue", back_populates="order", cascade="all, delete-orphan")
+    glue = relationship("OrderGlue", back_populates="order", cascade="all, delete-orphan", uselist=False)
 
     def to_dict(self):
         joints_data = [{"type": joint.joint_type.value, "color": joint.joint_color, "quantity": joint.quantity, "thickness": joint.joint_thickness} for joint in self.joints] if self.joints else []
-        items_data = [{"product_id": item.product_id, "color": item.color, "thickness": item.thickness, "quantity": item.quantity} for item in self.items] if self.items else []
+        items_data = [{"product_id": item.product_id, "color": item.color, "thickness": item.thickness, "quantity": item.quantity} for item in self.products] if self.products else []
+        glue_quantity = self.glue.quantity if self.glue else 0
             
         return {
             "id": self.id,
             "items": items_data,
             "joints": joints_data,
-            "glue_quantity": sum([glue.quantity for glue in self.glues]) if self.glues else 0,
+            "glue_quantity": glue_quantity,
             "installation_required": self.installation_required,
             "customer_phone": self.customer_phone,
             "delivery_address": self.delivery_address,

@@ -758,44 +758,31 @@ async def process_order_confirmation(message: Message, state: FSMContext):
         installation_required = data.get("installation_required", False)
         glue_quantity = data.get("glue_quantity", 0)
         
-        # Проверяем наличие пользователя и создаем его, если нужно
-        user_id = message.from_user.id
-        username = message.from_user.username or "unknown"
+        # Получаем telegram_id пользователя
+        telegram_id = message.from_user.id
         
-        # Отдельная транзакция для создания пользователя
+        # Начинаем транзакцию
         db = next(get_db())
         try:
-            # Проверяем существование пользователя
-            user = db.query(User).filter(User.telegram_id == user_id).first()
+            # Находим пользователя по telegram_id
+            user = db.query(User).filter(User.telegram_id == telegram_id).first()
             
+            # Если пользователь не найден, прерываем операцию
             if not user:
-                logging.info(f"Creating new user with telegram_id={user_id} and username={username}")
-                # Создаем нового пользователя с ролью по умолчанию
-                user = User(
-                    telegram_id=user_id,
-                    username=username,
-                    role=UserRole.SALES_MANAGER
+                logging.error(f"User with telegram_id={telegram_id} not found in database during order confirmation.")
+                await message.answer(
+                    "❌ Ошибка: Ваш пользователь не найден в системе. Пожалуйста, выполните команду /start и попробуйте снова.",
+                    reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
                 )
-                db.add(user)
-                db.commit()
-                logging.info(f"User with telegram_id={user_id} successfully created and committed")
-        except Exception as e:
-            db.rollback()
-            logging.error(f"Error creating user: {e}")
-            await message.answer(
-                f"❌ Произошла ошибка при создании пользователя: {e}",
-                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
-            )
-            return
-        finally:
-            db.close()
-        
-        # Теперь создаем заказ в новой транзакции
-        db = next(get_db())
-        try:
+                await state.set_state(MenuState.SALES_MAIN) # Сбрасываем состояние
+                return
+            
+            # Используем user.id для создания заказа
+            manager_db_id = user.id
+            
             # Создаем заказ
             order = Order(
-                manager_id=user_id,
+                manager_id=manager_db_id, # Используем ID пользователя из базы
                 customer_phone=customer_phone,
                 delivery_address=delivery_address,
                 installation_required=installation_required,
@@ -842,7 +829,7 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                     operation = Operation(
                         operation_type=OperationType.READY_PRODUCT_OUT.value,
                         quantity=qty,
-                        user_id=message.from_user.id,
+                        user_id=manager_db_id, # Используем ID из базы
                         details=json.dumps({"film_id": film.id, "film_code": film_code, "thickness": thickness})
                     )
                     
@@ -859,7 +846,7 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                     
                     # Создаем производственный заказ
                     production_order = ProductionOrder(
-                        manager_id=message.from_user.id,
+                        manager_id=manager_db_id,
                         film_id=film.id,
                         panel_thickness=thickness,
                         panel_quantity=qty,
@@ -920,7 +907,7 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                         operation = Operation(
                             operation_type=OperationType.JOINT_OUT.value,
                             quantity=joint_qty,
-                            user_id=message.from_user.id
+                            user_id=manager_db_id
                         )
                         db.add(operation)
             
@@ -947,7 +934,7 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                     operation = Operation(
                         operation_type=OperationType.GLUE_OUT.value,
                         quantity=glue_quantity,
-                        user_id=message.from_user.id
+                        user_id=manager_db_id
                     )
                     db.add(operation)
             
