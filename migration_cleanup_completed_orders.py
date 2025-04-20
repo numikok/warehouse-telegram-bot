@@ -123,6 +123,30 @@ def run_migration():
                     "WHERE table_name = 'completed_order_items' AND column_name = 'color'"
                 )).fetchone() is not None
                 
+                # Проверка колонки completed_order_id в items
+                completed_order_id_items_exists = connection.execute(text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name = 'completed_order_items' AND column_name = 'completed_order_id'"
+                )).fetchone() is not None
+                
+                # Проверка колонки completed_order_id в joints
+                completed_order_id_joints_exists = connection.execute(text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name = 'completed_order_joints' AND column_name = 'completed_order_id'"
+                )).fetchone() is not None
+                
+                # Проверка колонки completed_order_id в glues
+                completed_order_id_glues_exists = connection.execute(text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name = 'completed_order_glues' AND column_name = 'completed_order_id'"
+                )).fetchone() is not None
+                
+                # Проверка колонки order_id в items
+                order_id_items_exists = connection.execute(text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name = 'completed_order_items' AND column_name = 'order_id'"
+                )).fetchone() is not None
+                
                 # Удаление колонок, если они существуют
                 if product_id_exists:
                     logger.info("Dropping Product_id column...")
@@ -140,6 +164,19 @@ def run_migration():
                 if not color_exists:
                     logger.info("Adding color column...")
                     connection.execute(text("ALTER TABLE completed_order_items ADD COLUMN color VARCHAR NOT NULL DEFAULT 'Неизвестно'"))
+                
+                # Переименование колонки completed_order_id в order_id для всех таблиц, если требуется
+                if completed_order_id_items_exists and not order_id_items_exists:
+                    logger.info("Renaming completed_order_id to order_id in completed_order_items table...")
+                    connection.execute(text("ALTER TABLE completed_order_items RENAME COLUMN completed_order_id TO order_id"))
+                
+                if completed_order_id_joints_exists:
+                    logger.info("Renaming completed_order_id to order_id in completed_order_joints table...")
+                    connection.execute(text("ALTER TABLE completed_order_joints RENAME COLUMN completed_order_id TO order_id"))
+                
+                if completed_order_id_glues_exists:
+                    logger.info("Renaming completed_order_id to order_id in completed_order_glues table...")
+                    connection.execute(text("ALTER TABLE completed_order_glues RENAME COLUMN completed_order_id TO order_id"))
                 
                 logger.info("Migration completed successfully!")
                 
