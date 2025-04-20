@@ -816,8 +816,7 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                     # Если есть готовая продукция, используем её
                     order_item = OrderItem(
                         order_id=order.id,
-                        product_id=finished_product.id,
-                        quantity=product['quantity'],
+                        quantity=qty,
                         color=product['film_code'],
                         thickness=product['thickness']
                     )
@@ -838,7 +837,6 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                     # Если нет готовой продукции, создаем заказ на производство
                     order_item = OrderItem(
                         order_id=order.id,
-                        product_id=finished_product.id,
                         quantity=qty,
                         color=product['film_code'],
                         thickness=product['thickness']
@@ -858,7 +856,6 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                 db.add(order_item)
             
             # Обновляем общее количество панелей в заказе
-            order.panel_quantity = total_panels
             
             # Если нужны стыки, добавляем их в заказ
             total_joints = 0
@@ -913,7 +910,6 @@ async def process_order_confirmation(message: Message, state: FSMContext):
             
             # Обновляем общее количество стыков в заказе
             order.joint_quantity = total_joints
-            
             # Если нужен клей, добавляем в заказ
             if need_glue and glue_quantity > 0:
                 # Получаем объект клея
