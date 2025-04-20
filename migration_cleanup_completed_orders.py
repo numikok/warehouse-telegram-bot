@@ -147,6 +147,18 @@ def run_migration():
                     "WHERE table_name = 'completed_order_items' AND column_name = 'order_id'"
                 )).fetchone() is not None
                 
+                # Проверка колонки film_thickness в items
+                film_thickness_exists = connection.execute(text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name = 'completed_order_items' AND column_name = 'film_thickness'"
+                )).fetchone() is not None
+                
+                # Проверка колонки thickness в items
+                thickness_exists = connection.execute(text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name = 'completed_order_items' AND column_name = 'thickness'"
+                )).fetchone() is not None
+                
                 # Удаление колонок, если они существуют
                 if product_id_exists:
                     logger.info("Dropping Product_id column...")
@@ -177,6 +189,11 @@ def run_migration():
                 if completed_order_id_glues_exists:
                     logger.info("Renaming completed_order_id to order_id in completed_order_glues table...")
                     connection.execute(text("ALTER TABLE completed_order_glues RENAME COLUMN completed_order_id TO order_id"))
+                
+                # Переименование колонки film_thickness в thickness, если требуется
+                if film_thickness_exists and not thickness_exists:
+                    logger.info("Renaming film_thickness to thickness in completed_order_items table...")
+                    connection.execute(text("ALTER TABLE completed_order_items RENAME COLUMN film_thickness TO thickness"))
                 
                 logger.info("Migration completed successfully!")
                 
