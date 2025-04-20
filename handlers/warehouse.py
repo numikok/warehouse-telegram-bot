@@ -178,8 +178,10 @@ async def display_active_orders(message: Message):
                     film_code = film.code if film else "Неизвестный"
                     products_info += f"  • {film_code}, толщина {product.thickness} мм: {product.quantity} шт.\n"
             else:
-                # Используем старое поле для обратной совместимости
-                products_info = f"🎨 Пленка: {order.film_code}, {order.panel_quantity} шт.\n"
+                # Проверяем, есть ли поле film_code (оно может быть None если нет products)
+                film_code = getattr(order, 'film_code', 'Неизвестный')
+                panel_quantity = getattr(order, 'panel_quantity', 0)
+                products_info = f"🎨 Пленка: {film_code or 'Неизвестный'}, {panel_quantity} шт.\n"
             
             # Формируем информацию о стыках
             joints_info = ""
@@ -326,14 +328,22 @@ async def process_order_shipment(message: Message, order_id: int):
                         missing_materials.append(f"Продукция {film_code} (толщина {product.thickness} мм): требуется {product.quantity} шт., доступно {available} шт.")
         else:
             # Поддержка обратной совместимости для старого способа
-            finished_product = db.query(FinishedProduct).join(Film).filter(
-                Film.code == order.film_code,
-                FinishedProduct.thickness == order.panel_thickness
-            ).first()
-            
-            if not finished_product or finished_product.quantity < order.panel_quantity:
-                available = finished_product.quantity if finished_product else 0
-                missing_materials.append(f"Пленка {order.film_code}: требуется {order.panel_quantity} шт., доступно {available} шт.")
+            try:
+                film_code = order.film_code
+                panel_thickness = order.panel_thickness
+                panel_quantity = order.panel_quantity
+                
+                if film_code is not None and panel_thickness is not None and panel_quantity > 0:
+                    finished_product = db.query(FinishedProduct).join(Film).filter(
+                        Film.code == film_code,
+                        FinishedProduct.thickness == panel_thickness
+                    ).first()
+                    
+                    if finished_product:
+                        finished_product.quantity -= panel_quantity
+            except (AttributeError, IndexError):
+                # Пропускаем, если атрибуты отсутствуют
+                pass
         
         # Проверяем стыки (новый способ через отношения)
         if order.joints:
@@ -398,13 +408,22 @@ async def process_order_shipment(message: Message, order_id: int):
                         finished_product.quantity -= product.quantity
         else:
             # Поддержка обратной совместимости
-            finished_product = db.query(FinishedProduct).join(Film).filter(
-                Film.code == order.film_code,
-                FinishedProduct.thickness == order.panel_thickness
-            ).first()
-            
-            if finished_product:
-                finished_product.quantity -= order.panel_quantity
+            try:
+                film_code = order.film_code
+                panel_thickness = order.panel_thickness
+                panel_quantity = order.panel_quantity
+                
+                if film_code is not None and panel_thickness is not None and panel_quantity > 0:
+                    finished_product = db.query(FinishedProduct).join(Film).filter(
+                        Film.code == film_code,
+                        FinishedProduct.thickness == panel_thickness
+                    ).first()
+                    
+                    if finished_product:
+                        finished_product.quantity -= panel_quantity
+            except (AttributeError, IndexError):
+                # Пропускаем, если атрибуты отсутствуют
+                pass
         
         # Списываем стыки
         if order.joints:
