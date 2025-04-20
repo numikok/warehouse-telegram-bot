@@ -73,5 +73,79 @@ def main():
     except Exception as e:
         logger.error(f"Ошибка при выполнении миграции: {e}")
 
+def run_migration():
+    # Получение URL базы данных
+    database_url = os.getenv("DATABASE_URL")
+    
+    if not database_url:
+        logger.error("DATABASE_URL не указан в переменных окружения")
+        logger.info("Эту миграцию необходимо выполнить на сервере Heroku.")
+        logger.info("Выполните команду: heroku run python migration_cleanup_completed_orders.py")
+        return
+    
+    # Исправление для Heroku: преобразование postgres:// в postgresql://
+    if database_url.startswith("postgres://"):
+        database_url = database_url.replace("postgres://", "postgresql://", 1)
+    
+    logger.info(f"Connecting to database for migration...")
+    
+    # Создание движка SQLAlchemy
+    engine = create_engine(database_url)
+    
+    try:
+        with engine.connect() as connection:
+            # Начинаем транзакцию
+            with connection.begin():
+                # Проверяем, существуют ли колонки, которые нужно удалить
+                logger.info("Checking if columns exist in the completed_order_items table...")
+                
+                # Проверка колонки Product_id
+                product_id_exists = connection.execute(text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name = 'completed_order_items' AND column_name = 'product_id'"
+                )).fetchone() is not None
+                
+                # Проверка колонки Film_ID
+                film_id_exists = connection.execute(text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name = 'completed_order_items' AND column_name = 'film_id'"
+                )).fetchone() is not None
+                
+                # Проверка колонки Item_type
+                item_type_exists = connection.execute(text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name = 'completed_order_items' AND column_name = 'item_type'"
+                )).fetchone() is not None
+                
+                # Проверка колонки color
+                color_exists = connection.execute(text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name = 'completed_order_items' AND column_name = 'color'"
+                )).fetchone() is not None
+                
+                # Удаление колонок, если они существуют
+                if product_id_exists:
+                    logger.info("Dropping Product_id column...")
+                    connection.execute(text("ALTER TABLE completed_order_items DROP COLUMN product_id"))
+                
+                if film_id_exists:
+                    logger.info("Dropping Film_ID column...")
+                    connection.execute(text("ALTER TABLE completed_order_items DROP COLUMN film_id"))
+                
+                if item_type_exists:
+                    logger.info("Dropping Item_type column...")
+                    connection.execute(text("ALTER TABLE completed_order_items DROP COLUMN item_type"))
+                
+                # Добавление колонки color, если она не существует
+                if not color_exists:
+                    logger.info("Adding color column...")
+                    connection.execute(text("ALTER TABLE completed_order_items ADD COLUMN color VARCHAR NOT NULL DEFAULT 'Неизвестно'"))
+                
+                logger.info("Migration completed successfully!")
+                
+    except Exception as e:
+        logger.error(f"Error during migration: {e}")
+        raise
+    
 if __name__ == "__main__":
-    main() 
+    run_migration() 

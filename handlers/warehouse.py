@@ -200,20 +200,35 @@ async def display_active_orders(message: Message):
                         logging.error(f"Error displaying product: {str(e)}")
                         products_info += "  • Продукция (ошибка чтения данных)\n"
             else:
-                # Пытаемся использовать устаревшие свойства, если они есть
+                # Для поддержки старой структуры
                 try:
                     if hasattr(order, 'film_code') and order.film_code:
-                        panel_quantity = 0
-                        try:
-                            if hasattr(order, 'panel_quantity'):
-                                panel_quantity = order.panel_quantity
-                        except:
-                            pass
-                        products_info = f"🎨 Пленка: {order.film_code}, {panel_quantity} шт.\n"
-                    else:
-                        products_info = "🎨 Продукция: Не указана\n"
-                except:
-                    products_info = "🎨 Продукция: Не указана\n"
+                        # Создаем запись о выполненном товаре
+                        item_data = {
+                            'order_id': completed_order.id,
+                            'color': order.film_code,
+                            'thickness': getattr(order, 'panel_thickness', 0.5),
+                            'quantity': getattr(order, 'panel_quantity', 0)
+                        }
+                        
+                        # Находим пленку по коду только для списания со склада
+                        film = db.query(Film).filter(Film.code == order.film_code).first()
+                            
+                        completed_item = CompletedOrderItem(**item_data)
+                        db.add(completed_item)
+                        logging.info(f"Добавлен товар из старой структуры в completed_order_items: {item_data}")
+                        
+                        # Списываем со склада
+                        if film:
+                            finished_product = db.query(FinishedProduct).filter(
+                                FinishedProduct.film_id == film.id,
+                                FinishedProduct.thickness == item_data['thickness']
+                            ).first()
+                            
+                            if finished_product:
+                                finished_product.quantity -= item_data['quantity']
+                except Exception as e:
+                    logging.error(f"Ошибка при добавлении продукта из старой структуры: {str(e)}")
             
             # Формируем информацию о стыках
             joints_info = ""
@@ -296,16 +311,15 @@ async def display_active_orders(message: Message):
             
             # Получаем информацию о количестве клея
             glue_quantity = 0
-            try:
-                if hasattr(order, 'glues') and order.glues:
-                    for glue in order.glues:
-                        glue_quantity += getattr(glue, 'quantity', 0)
-                elif hasattr(order, 'glue_quantity'):
-                    glue_quantity = order.glue_quantity
-            except Exception as e:
-                logging.error(f"Error getting glue quantity: {str(e)}")
-                glue_quantity = 0
-            
+            if hasattr(order, 'glues') and order.glues:
+                try:
+                    glue_quantity = sum(getattr(glue, 'quantity', 0) for glue in order.glues)
+                except Exception as e:
+                    logging.error(f"Ошибка при извлечении данных о клее: {str(e)}")
+            else:
+                # Если нет glues, пробуем получить атрибуты напрямую из заказа (старая структура)
+                glue_quantity = getattr(order, 'glue_quantity', 0)
+                
             response += (
                 f"📝 Заказ #{order.id}\n"
                 f"📆 Дата: {order.created_at.strftime('%d.%m.%Y %H:%M')}\n"
