@@ -175,30 +175,29 @@ async def display_active_orders(message: Message):
                 products_info = "🎨 Продукция:\n"
                 for product in order.products:
                     try:
-                        # Базовая информация о продукте
-                        color = getattr(product, 'color', "Не указан")
-                        thickness = getattr(product, 'thickness', "Н/Д")
-                        quantity = getattr(product, 'quantity', 0)
+                        # Извлекаем всю доступную информацию о продукте
+                        product_desc = []
                         
-                        products_info += f"  • Цвет: {color}, толщина {thickness} мм: {quantity} шт.\n"
+                        # Проверяем каждый атрибут, используя безопасные методы доступа
+                        color = getattr(product, 'color', "Не указан")
+                        if color:
+                            product_desc.append(f"цвет: {color}")
+                            
+                        thickness = getattr(product, 'thickness', None)
+                        if thickness is not None:
+                            product_desc.append(f"толщина: {thickness} мм")
+                            
+                        quantity = getattr(product, 'quantity', None)
+                        if quantity is not None:
+                            product_desc.append(f"кол-во: {quantity} шт")
+                        
+                        if product_desc:
+                            products_info += f"  • {', '.join(product_desc)}\n"
+                        else:
+                            products_info += "  • Продукция (данные недоступны)\n"
                     except Exception as e:
                         logging.error(f"Error displaying product: {str(e)}")
-                        # Собираем всю доступную информацию
-                        product_desc = []
-                        try:
-                            if hasattr(product, 'color') and product.color:
-                                product_desc.append(f"цвет: {product.color}")
-                            if hasattr(product, 'thickness'):
-                                product_desc.append(f"толщина: {product.thickness}")
-                            if hasattr(product, 'quantity'):
-                                product_desc.append(f"кол-во: {product.quantity}")
-                                
-                            if product_desc:
-                                products_info += f"  • Продукция ({', '.join(product_desc)})\n"
-                            else:
-                                products_info += "  • Неизвестная продукция\n"
-                        except:
-                            products_info += "  • Неизвестная продукция\n"
+                        products_info += "  • Продукция (ошибка чтения данных)\n"
             else:
                 # Пытаемся использовать устаревшие свойства, если они есть
                 try:
@@ -221,40 +220,50 @@ async def display_active_orders(message: Message):
                 joints_info = "🔗 Стыки:\n"
                 for joint in order.joints:
                     try:
+                        # Извлекаем всю доступную информацию о стыке
+                        joint_desc = []
+                        
+                        # Тип стыка
                         joint_type_text = "Не указан"
                         if hasattr(joint, 'joint_type'):
-                            if joint.joint_type == JointType.BUTTERFLY:
-                                joint_type_text = "Бабочка"
-                            elif joint.joint_type == JointType.SIMPLE:
-                                joint_type_text = "Простые"
-                            elif joint.joint_type == JointType.CLOSING:
-                                joint_type_text = "Замыкающие"
+                            try:
+                                if joint.joint_type == JointType.BUTTERFLY:
+                                    joint_type_text = "Бабочка"
+                                elif joint.joint_type == JointType.SIMPLE:
+                                    joint_type_text = "Простые"
+                                elif joint.joint_type == JointType.CLOSING:
+                                    joint_type_text = "Замыкающие"
+                                else:
+                                    joint_type_text = str(joint.joint_type)
+                                joint_desc.append(joint_type_text)
+                            except Exception as e:
+                                logging.error(f"Error processing joint type: {str(e)}")
+                                joint_desc.append("тип: Не удалось определить")
                         
-                        joint_color = getattr(joint, 'joint_color', "Не указан")
-                        quantity = getattr(joint, 'quantity', 0)
-                        thickness = getattr(joint, 'joint_thickness', "Н/Д")
+                        # Цвет стыка
+                        joint_color = getattr(joint, 'joint_color', None)
+                        if joint_color:
+                            joint_desc.append(f"цвет: {joint_color}")
+                            
+                        # Толщина стыка
+                        thickness = getattr(joint, 'joint_thickness', None)
+                        if thickness is not None:
+                            joint_desc.append(f"толщина: {thickness} мм")
+                            
+                        # Количество стыков
+                        quantity = getattr(joint, 'quantity', None)
+                        if quantity is None:
+                            quantity = getattr(joint, 'joint_quantity', 0)
+                        if quantity:
+                            joint_desc.append(f"кол-во: {quantity} шт")
                         
-                        joints_info += f"  • {joint_type_text}, цвет: {joint_color}, толщина: {thickness} мм: {quantity} шт.\n"
+                        if joint_desc:
+                            joints_info += f"  • {', '.join(joint_desc)}\n"
+                        else:
+                            joints_info += "  • Стык (данные недоступны)\n"
                     except Exception as e:
                         logging.error(f"Error displaying joint: {str(e)}")
-                        # Собираем всю доступную информацию
-                        joint_desc = []
-                        try:
-                            if hasattr(joint, 'joint_type'):
-                                joint_desc.append(f"тип: {joint.joint_type.value if hasattr(joint.joint_type, 'value') else joint.joint_type}")
-                            if hasattr(joint, 'joint_color'):
-                                joint_desc.append(f"цвет: {joint.joint_color}")
-                            if hasattr(joint, 'quantity'):
-                                joint_desc.append(f"кол-во: {joint.quantity}")
-                            if hasattr(joint, 'joint_thickness'):
-                                joint_desc.append(f"толщина: {joint.joint_thickness}")
-                                
-                            if joint_desc:
-                                joints_info += f"  • Стык ({', '.join(joint_desc)})\n"
-                            else:
-                                joints_info += "  • Неизвестный стык\n"
-                        except:
-                            joints_info += "  • Неизвестный стык\n"
+                        joints_info += "  • Стык (ошибка чтения данных)\n"
             else:
                 # Пытаемся использовать устаревшие свойства, если они есть
                 try:
