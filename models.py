@@ -160,13 +160,11 @@ class OrderItem(Base):
     
     id = Column(Integer, primary_key=True)
     order_id = Column(Integer, ForeignKey('orders.id', ondelete='CASCADE'), nullable=False)
-    product_id = Column(Integer, ForeignKey('finished_products.id'), nullable=True)
     quantity = Column(Integer, nullable=False)
     color = Column(String, nullable=False)
     thickness = Column(Float, nullable=False, default=0.5)  # Толщина продукции (0.5 или 0.8)
     
     order = relationship("Order", back_populates="products")
-    product = relationship("FinishedProduct")
 
 class OrderGlue(Base):
     __tablename__ = "order_glues"
@@ -198,7 +196,7 @@ class Order(Base):
 
     def to_dict(self):
         joints_data = [{"type": joint.joint_type.value, "color": joint.joint_color, "quantity": joint.quantity, "thickness": joint.joint_thickness} for joint in self.joints] if self.joints else []
-        items_data = [{"product_id": item.product_id, "color": item.color, "thickness": item.thickness, "quantity": item.quantity} for item in self.products] if self.products else []
+        items_data = [{"color": item.color, "thickness": item.thickness, "quantity": item.quantity} for item in self.products] if self.products else []
         glue_quantity = sum([glue.quantity for glue in self.glues]) if self.glues else 0
             
         return {
@@ -231,7 +229,6 @@ class CompletedOrderItem(Base):
     
     id = Column(Integer, primary_key=True)
     order_id = Column(Integer, ForeignKey('completed_orders.id', ondelete='CASCADE'), nullable=False)
-    product_id = Column(Integer, nullable=True)
     quantity = Column(Integer, nullable=False)
     color = Column(String, nullable=False)
     thickness = Column(Float, nullable=False, default=0.5)  # Толщина продукции (0.5 или 0.8)
@@ -267,7 +264,7 @@ class CompletedOrder(Base):
 
     def to_dict(self):
         joints_data = [{"type": joint.joint_type.value, "color": joint.joint_color, "quantity": joint.quantity, "thickness": joint.joint_thickness} for joint in self.joints] if self.joints else []
-        items_data = [{"product_id": item.product_id, "color": item.color, "thickness": item.thickness, "quantity": item.quantity} for item in self.items] if self.items else []
+        items_data = [{"color": item.color, "thickness": item.thickness, "quantity": item.quantity} for item in self.items] if self.items else []
             
         return {
             "id": self.id,
