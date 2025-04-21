@@ -914,6 +914,9 @@ async def process_order_confirmation(message: Message, state: FSMContext):
             # Обновляем общее количество стыков в заказе
             order.joint_quantity = total_joints
             # Если указано количество клея, добавляем в заказ
+            glue_quantity = data.get('glue_quantity', 0)
+            logging.info(f"DEBUG: Order confirmation - need_glue: {data.get('need_glue', False)}, glue_quantity: {glue_quantity}")
+            
             if glue_quantity > 0:  # Было: if need_glue and glue_quantity > 0:
                 # Получаем объект клея
                 glue = db.query(Glue).first()
