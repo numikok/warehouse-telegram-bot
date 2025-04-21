@@ -203,32 +203,27 @@ async def display_active_orders(message: Message):
                 # Для поддержки старой структуры
                 try:
                     if hasattr(order, 'film_code') and order.film_code:
-                        # Создаем запись о выполненном товаре
-                        item_data = {
-                            'order_id': completed_order.id,
-                            'color': order.film_code,
-                            'thickness': getattr(order, 'panel_thickness', 0.5),
-                            'quantity': getattr(order, 'panel_quantity', 0)
-                        }
+                        products_info = "🎨 Продукция:\n"
                         
-                        # Находим пленку по коду только для списания со склада
-                        film = db.query(Film).filter(Film.code == order.film_code).first()
-                            
-                        completed_item = CompletedOrderItem(**item_data)
-                        db.add(completed_item)
-                        logging.info(f"Добавлен товар из старой структуры в completed_order_items: {item_data}")
+                        # Собираем информацию о продукте из старой структуры
+                        product_desc = []
                         
-                        # Списываем со склада
-                        if film:
-                            finished_product = db.query(FinishedProduct).filter(
-                                FinishedProduct.film_id == film.id,
-                                FinishedProduct.thickness == item_data['thickness']
-                            ).first()
+                        if order.film_code:
+                            product_desc.append(f"цвет: {order.film_code}")
                             
-                            if finished_product:
-                                finished_product.quantity -= item_data['quantity']
+                        if hasattr(order, 'panel_thickness'):
+                            product_desc.append(f"толщина: {order.panel_thickness} мм")
+                            
+                        if hasattr(order, 'panel_quantity'):
+                            product_desc.append(f"кол-во: {order.panel_quantity} шт")
+                            
+                        if product_desc:
+                            products_info += f"  • {', '.join(product_desc)}\n"
+                        else:
+                            products_info += "  • Продукция (данные недоступны)\n"
                 except Exception as e:
-                    logging.error(f"Ошибка при добавлении продукта из старой структуры: {str(e)}")
+                    logging.error(f"Ошибка при отображении продукта из старой структуры: {str(e)}")
+                    products_info += "  • Продукция (ошибка чтения данных)\n"
             
             # Формируем информацию о стыках
             joints_info = ""
