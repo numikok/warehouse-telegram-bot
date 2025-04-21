@@ -496,7 +496,23 @@ async def process_order_shipment(message: Message, order_id: int):
                                 ).first()
                                 
                                 if finished_product:
-                                    finished_product.quantity -= item_data['quantity']
+                                    old_quantity = finished_product.quantity
+                                    new_quantity = old_quantity - item_data['quantity']
+                                    logging.info(f"Списываем продукцию со склада: film_id={film_id}, thickness={item_data['thickness']}, было={old_quantity}, станет={new_quantity}")
+                                    
+                                    finished_product.quantity = new_quantity
+                                    db.flush()  # Фиксируем изменения в памяти
+                                    
+                                    # Проверяем, что изменения применились
+                                    updated_product = db.query(FinishedProduct).filter(
+                                        FinishedProduct.film_id == film_id,
+                                        FinishedProduct.thickness == item_data['thickness']
+                                    ).first()
+                                    
+                                    if updated_product and updated_product.quantity == new_quantity:
+                                        logging.info(f"Успешно списана продукция. Новое количество в базе: {updated_product.quantity}")
+                                    else:
+                                        logging.error(f"Ошибка списания продукции! Текущее количество в базе: {updated_product.quantity if updated_product else 'не найдено'}")
                     except Exception as e:
                         logging.error(f"Ошибка при добавлении продукта в выполненный заказ: {str(e)}")
             else:
@@ -530,7 +546,23 @@ async def process_order_shipment(message: Message, order_id: int):
                             ).first()
                             
                             if finished_product:
-                                finished_product.quantity -= item_data['quantity']
+                                old_quantity = finished_product.quantity
+                                new_quantity = old_quantity - item_data['quantity']
+                                logging.info(f"Списываем продукцию из старой структуры: film_id={film.id}, thickness={item_data['thickness']}, было={old_quantity}, станет={new_quantity}")
+                                
+                                finished_product.quantity = new_quantity
+                                db.flush()
+                                
+                                # Проверяем, что изменения применились
+                                updated_product = db.query(FinishedProduct).filter(
+                                    FinishedProduct.film_id == film.id,
+                                    FinishedProduct.thickness == item_data['thickness']
+                                ).first()
+                                
+                                if updated_product and updated_product.quantity == new_quantity:
+                                    logging.info(f"Успешно списана продукция из старой структуры. Новое количество в базе: {updated_product.quantity}")
+                                else:
+                                    logging.error(f"Ошибка списания продукции из старой структуры! Текущее количество в базе: {updated_product.quantity if updated_product else 'не найдено'}")
                 except Exception as e:
                     logging.error(f"Ошибка при добавлении продукта из старой структуры: {str(e)}")
             
@@ -565,7 +597,24 @@ async def process_order_shipment(message: Message, order_id: int):
                             ).first()
                             
                             if joint_db:
-                                joint_db.quantity -= quantity
+                                old_quantity = joint_db.quantity
+                                new_quantity = old_quantity - quantity
+                                logging.info(f"Списываем стык со склада: type={joint_type}, color={joint_color}, thickness={thickness}, было={old_quantity}, станет={new_quantity}")
+                                
+                                joint_db.quantity = new_quantity
+                                db.flush()
+                                
+                                # Проверяем, что изменения применились
+                                updated_joint = db.query(Joint).filter(
+                                    Joint.type == joint_type,
+                                    Joint.color == joint_color,
+                                    Joint.thickness == thickness
+                                ).first()
+                                
+                                if updated_joint and updated_joint.quantity == new_quantity:
+                                    logging.info(f"Успешно списан стык. Новое количество в базе: {updated_joint.quantity}")
+                                else:
+                                    logging.error(f"Ошибка списания стыка! Текущее количество в базе: {updated_joint.quantity if updated_joint else 'не найдено'}")
                     except Exception as e:
                         logging.error(f"Ошибка при добавлении стыка в выполненный заказ: {str(e)}")
             else:
@@ -591,14 +640,32 @@ async def process_order_shipment(message: Message, order_id: int):
                         logging.info(f"Добавлен стык из старой структуры в completed_order_joints: {joint_data}")
                         
                         # Списываем со склада
+                        joint_thickness = getattr(order, 'panel_thickness', 0.5)
                         joint_db = db.query(Joint).filter(
                             Joint.type == joint_type,
                             Joint.color == joint_color,
-                            Joint.thickness == getattr(order, 'panel_thickness', 0.5)
+                            Joint.thickness == joint_thickness
                         ).first()
                         
                         if joint_db:
-                            joint_db.quantity -= joint_quantity
+                            old_quantity = joint_db.quantity
+                            new_quantity = old_quantity - joint_quantity
+                            logging.info(f"Списываем стык из старой структуры: type={joint_type}, color={joint_color}, thickness={joint_thickness}, было={old_quantity}, станет={new_quantity}")
+                            
+                            joint_db.quantity = new_quantity
+                            db.flush()
+                            
+                            # Проверяем, что изменения применились
+                            updated_joint = db.query(Joint).filter(
+                                Joint.type == joint_type,
+                                Joint.color == joint_color,
+                                Joint.thickness == joint_thickness
+                            ).first()
+                            
+                            if updated_joint and updated_joint.quantity == new_quantity:
+                                logging.info(f"Успешно списан стык из старой структуры. Новое количество в базе: {updated_joint.quantity}")
+                            else:
+                                logging.error(f"Ошибка списания стыка из старой структуры! Текущее количество в базе: {updated_joint.quantity if updated_joint else 'не найдено'}")
                 except Exception as e:
                     logging.error(f"Ошибка при добавлении стыка из старой структуры: {str(e)}")
             
@@ -628,7 +695,19 @@ async def process_order_shipment(message: Message, order_id: int):
                     # Списываем клей со склада
                     glue = db.query(Glue).first()
                     if glue:
-                        glue.quantity -= glue_quantity
+                        old_quantity = glue.quantity
+                        new_quantity = old_quantity - glue_quantity
+                        logging.info(f"Списываем клей со склада: было={old_quantity}, станет={new_quantity}")
+                        
+                        glue.quantity = new_quantity
+                        db.flush()
+                        
+                        # Проверяем, что изменения применились
+                        updated_glue = db.query(Glue).first()
+                        if updated_glue and updated_glue.quantity == new_quantity:
+                            logging.info(f"Успешно списан клей. Новое количество в базе: {updated_glue.quantity}")
+                        else:
+                            logging.error(f"Ошибка списания клея! Текущее количество в базе: {updated_glue.quantity if updated_glue else 'не найдено'}")
                 except Exception as e:
                     logging.error(f"Ошибка при добавлении клея в выполненный заказ: {str(e)}")
             
@@ -637,7 +716,9 @@ async def process_order_shipment(message: Message, order_id: int):
             order.completed_at = datetime.utcnow()
             
             # Сохраняем изменения в базе данных
+            logging.info(f"Применяем все изменения в БД через commit для заказа #{order.id}")
             db.commit()
+            logging.info(f"Изменения успешно сохранены в БД для заказа #{order.id}")
             
             # Отправляем сообщение менеджеру о выполнении заказа
             manager = db.query(User).filter(User.id == order.manager_id).first()
