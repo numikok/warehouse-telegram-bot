@@ -477,42 +477,47 @@ async def process_order_shipment(message: Message, order_id: int):
                             'thickness': getattr(product, 'thickness', 0.5)
                         }
                         
-                        # Проверяем наличие film_id для логирования и списания со склада, но не добавляем в item_data
-                        film_id = getattr(product, 'film_id', None)
-                        if film_id is not None:
-                            logging.info(f"Найден film_id: {film_id} для продукта, но не будет добавлен в CompletedOrderItem")
+                        # Вместо поиска по film_id, ищем Film по коду пленки (color) и затем FinishedProduct
+                        color = getattr(product, 'color', None)
+                        thickness = getattr(product, 'thickness', 0.5)
                         
-                        if item_data['quantity'] > 0:
+                        if color and item_data['quantity'] > 0:
                             # Создаем запись о выполненном товаре
                             completed_item = CompletedOrderItem(**item_data)
                             db.add(completed_item)
                             logging.info(f"Добавлен товар в completed_order_items: {item_data}")
                             
-                            # Списываем со склада
-                            if film_id is not None:
+                            # Ищем пленку по коду
+                            film = db.query(Film).filter(Film.code == color).first()
+                            if film:
+                                # Ищем готовую продукцию по film_id и толщине
                                 finished_product = db.query(FinishedProduct).filter(
-                                    FinishedProduct.film_id == film_id,
-                                    FinishedProduct.thickness == item_data['thickness']
+                                    FinishedProduct.film_id == film.id,
+                                    FinishedProduct.thickness == thickness
                                 ).first()
                                 
                                 if finished_product:
                                     old_quantity = finished_product.quantity
                                     new_quantity = old_quantity - item_data['quantity']
-                                    logging.info(f"Списываем продукцию со склада: film_id={film_id}, thickness={item_data['thickness']}, было={old_quantity}, станет={new_quantity}")
+                                    logging.info(f"Списываем продукцию со склада: film_code={color}, film_id={film.id}, thickness={thickness}, было={old_quantity}, станет={new_quantity}")
                                     
                                     finished_product.quantity = new_quantity
                                     db.flush()  # Фиксируем изменения в памяти
                                     
                                     # Проверяем, что изменения применились
                                     updated_product = db.query(FinishedProduct).filter(
-                                        FinishedProduct.film_id == film_id,
-                                        FinishedProduct.thickness == item_data['thickness']
+                                        FinishedProduct.film_id == film.id,
+                                        FinishedProduct.thickness == thickness
                                     ).first()
                                     
                                     if updated_product and updated_product.quantity == new_quantity:
                                         logging.info(f"Успешно списана продукция. Новое количество в базе: {updated_product.quantity}")
                                     else:
                                         logging.error(f"Ошибка списания продукции! Текущее количество в базе: {updated_product.quantity if updated_product else 'не найдено'}")
+                                else:
+                                    logging.error(f"Готовая продукция не найдена для film_id={film.id}, thickness={thickness}")
+                            else:
+                                logging.error(f"Пленка с кодом {color} не найдена")
                     except Exception as e:
                         logging.error(f"Ошибка при добавлении продукта в выполненный заказ: {str(e)}")
             else:
@@ -530,10 +535,6 @@ async def process_order_shipment(message: Message, order_id: int):
                             'quantity': getattr(order, 'panel_quantity', 0)
                         }
                         
-                        # Логируем film_id, но не добавляем в item_data
-                        if film:
-                            logging.info(f"Найден film_id: {film.id} для продукта из старой структуры, но не будет добавлен в CompletedOrderItem")
-                            
                         completed_item = CompletedOrderItem(**item_data)
                         db.add(completed_item)
                         logging.info(f"Добавлен товар из старой структуры в completed_order_items: {item_data}")
@@ -563,6 +564,10 @@ async def process_order_shipment(message: Message, order_id: int):
                                     logging.info(f"Успешно списана продукция из старой структуры. Новое количество в базе: {updated_product.quantity}")
                                 else:
                                     logging.error(f"Ошибка списания продукции из старой структуры! Текущее количество в базе: {updated_product.quantity if updated_product else 'не найдено'}")
+                            else:
+                                logging.error(f"Готовая продукция не найдена для film_id={film.id}, thickness={item_data['thickness']}")
+                        else:
+                            logging.error(f"Пленка с кодом {order.film_code} не найдена")
                 except Exception as e:
                     logging.error(f"Ошибка при добавлении продукта из старой структуры: {str(e)}")
             
