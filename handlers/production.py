@@ -1279,9 +1279,10 @@ async def handle_film(message: Message, state: FSMContext):
     current_state = await state.get_state()
     logging.info(f"Нажата кнопка 'Пленка', текущее состояние: {current_state}")
     
-    # Если мы в меню выбора типа брака, пропускаем эту обработку
-    if current_state == ProductionStates.waiting_for_defect_type:
-        logging.info("Пропускаем обработку в handle_film, так как находимся в меню брака. Будет вызван handle_film_defect.")
+    # Если мы в меню выбора типа брака, направляем запрос в обработчик брака
+    if current_state == "ProductionStates:waiting_for_defect_type":
+        logging.info("Перенаправляем в handle_film_defect, так как находимся в меню брака.")
+        await handle_film_defect(message, state)
         return
     
     # Если мы не в меню материалов, пропускаем обработку
@@ -1298,28 +1299,24 @@ async def handle_film(message: Message, state: FSMContext):
     # Получаем список существующих пленок
     db = next(get_db())
     try:
-        # Получаем список доступных пленок
         films = db.query(Film).all()
-        
-        # Формируем список пленок, если они есть
-        film_info_text = ""
         if films:
-            film_info = []
-            for film in films:
-                panel_count = film.calculate_possible_panels()
-                film_info.append(
-                    f"- {film.code}: {film.total_remaining:.2f}м (хватит на ~{panel_count} панелей)"
-                )
-            film_info_text = "\n\nИмеющиеся пленки:\n" + "\n".join(film_info)
-        
-        await message.answer(
-            f"Введите код пленки, которую хотите добавить:{film_info_text}",
-            reply_markup=keyboard
-        )
-        
-        await state.set_state(ProductionStates.waiting_for_film_code)
+            films_list = [f"- {film.code} (остаток: {film.total_remaining} м)" for film in films]
+            films_text = "\n".join(films_list)
+            
+            await message.answer(
+                f"Введите код пленки для добавления.\n\nТекущие коды в системе:\n{films_text}",
+                reply_markup=keyboard
+            )
+        else:
+            await message.answer(
+                "Введите код новой пленки для добавления:",
+                reply_markup=keyboard
+            )
     finally:
         db.close()
+        
+    await state.set_state(ProductionStates.waiting_for_film_code)
 
 @router.message(ProductionStates.waiting_for_film_code)
 async def process_film_code(message: Message, state: FSMContext):
@@ -1768,28 +1765,62 @@ async def process_defect_joint_quantity(message: Message, state: FSMContext):
 @router.message(ProductionStates.waiting_for_defect_type)
 async def debug_defect_type_handler(message: Message, state: FSMContext):
     logging.info(f"Получено сообщение в состоянии waiting_for_defect_type: '{message.text}'")
-    logging.info(f"Текущее состояние: {await state.get_state()}")
     
-    # Дамп полной информации о сообщении для отладки
-    try:
-        message_dict = {
-            "message_id": message.message_id,
-            "text": message.text,
-            "chat_id": message.chat.id,
-            "from_id": message.from_user.id if message.from_user else None,
-            "content_type": message.content_type
-        }
-        logging.info(f"Полная информация о сообщении: {message_dict}")
-    except Exception as e:
-        logging.error(f"Ошибка при дампе сообщения: {e}")
-    
+    # Если это нажатие кнопки "Назад", обрабатываем возврат в меню
+    if message.text == "◀️ Назад":
+        logging.info("Возврат в главное меню производства")
+        await state.set_state(MenuState.PRODUCTION_MAIN)
+        await message.answer(
+            "Выберите действие:",
+            reply_markup=get_menu_keyboard(MenuState.PRODUCTION_MAIN)
+        )
+        return
+        
     # Проверяем, соответствует ли сообщение какому-то из ожидаемых типов брака
     if message.text == "🪵 Панель":
         logging.info("Обнаружена кнопка 'Панель', вызываем обработчик вручную")
         await handle_panel_defect(message, state)
     elif message.text == "🎨 Пленка":
         logging.info("Обнаружена кнопка 'Пленка', вызываем обработчик вручную")
-        await handle_film_defect(message, state)
+        try:
+            await handle_film_defect(message, state)
+            logging.info("Обработчик handle_film_defect успешно выполнен")
+        except Exception as e:
+            logging.error(f"Ошибка при вызове handle_film_defect: {str(e)}")
+            # Запасной вариант - показать список пленок напрямую
+            db = next(get_db())
+            try:
+                films = db.query(Film).all()
+                films_list = [f"- {film.code} (остаток: {film.total_remaining} м)" for film in films]
+                
+                await state.update_data(defect_type="film")
+                await state.set_state(ProductionStates.waiting_for_defect_film_color)
+                
+                keyboard = ReplyKeyboardMarkup(
+                    keyboard=[[KeyboardButton(text="◀️ Назад")]],
+                    resize_keyboard=True
+                )
+                
+                if not films:
+                    await message.answer(
+                        "В системе нет ни одной пленки. Сначала добавьте пленку через меню 'Приход сырья'.",
+                        reply_markup=keyboard
+                    )
+                    return
+                
+                films_text = "\n".join(films_list)
+                await message.answer(
+                    f"Выберите цвет/код бракованной пленки из списка:\n\nДоступные варианты:\n{films_text}",
+                    reply_markup=keyboard
+                )
+            except Exception as db_error:
+                logging.error(f"Ошибка при обработке брака пленки: {str(db_error)}")
+                await message.answer(
+                    "Произошла ошибка при обработке брака пленки. Пожалуйста, попробуйте снова.",
+                    reply_markup=get_menu_keyboard(MenuState.PRODUCTION_MAIN)
+                )
+            finally:
+                db.close()
     elif message.text == "⚙️ Стык":
         logging.info("Обнаружена кнопка 'Стык', вызываем обработчик вручную")
         await handle_joint_defect(message, state)
