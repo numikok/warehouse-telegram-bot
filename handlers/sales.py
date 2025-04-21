@@ -802,9 +802,6 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                 qty = product['quantity']
                 total_panels += qty
                 
-                # Если есть хотя бы один продукт, установим толщину панели в заказе
-                order.panel_thickness = thickness
-                
                 film = db.query(Film).filter(Film.code == film_code).first()
                 if not film:
                     continue
@@ -859,8 +856,6 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                 
                 db.add(order_item)
             
-            # Обновляем общее количество панелей в заказе
-            
             # Если нужны стыки, добавляем их в заказ
             total_joints = 0
             if need_joints and selected_joints:
@@ -911,8 +906,6 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                         # )
                         # db.add(operation)
             
-            # Обновляем общее количество стыков в заказе
-            order.joint_quantity = total_joints
             # Если указано количество клея, добавляем в заказ
             glue_quantity = data.get('glue_quantity', 0)
             logging.info(f"DEBUG: Order confirmation - need_glue: {data.get('need_glue', False)}, glue_quantity: {glue_quantity}")
