@@ -1734,7 +1734,7 @@ async def handle_stock(message: Message, state: FSMContext):
         response = "📦 Готовая продукция на складе:\n\n"
         for product in finished_products:
             if product.quantity > 0:
-                response += f"- {product.film.code}: {product.quantity} шт.\n"
+                response += f"- {product.film.code} (толщина {product.thickness} мм): {product.quantity} шт.\n"
         
         await message.answer(
             response,
