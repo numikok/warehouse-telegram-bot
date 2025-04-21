@@ -482,10 +482,10 @@ async def process_order_shipment(message: Message, order_id: int):
                             'thickness': getattr(product, 'thickness', 0.5)
                         }
                         
-                        # Проверяем наличие film_id и добавляем его, если он есть
+                        # Проверяем наличие film_id для логирования и списания со склада, но не добавляем в item_data
                         film_id = getattr(product, 'film_id', None)
-                        if film_id is not None and hasattr(CompletedOrderItem, 'film_id'):
-                            item_data['film_id'] = film_id
+                        if film_id is not None:
+                            logging.info(f"Найден film_id: {film_id} для продукта, но не будет добавлен в CompletedOrderItem")
                         
                         if item_data['quantity'] > 0:
                             # Создаем запись о выполненном товаре
@@ -519,9 +519,9 @@ async def process_order_shipment(message: Message, order_id: int):
                             'quantity': getattr(order, 'panel_quantity', 0)
                         }
                         
-                        # Добавляем film_id, если он существует
-                        if film and hasattr(CompletedOrderItem, 'film_id'):
-                            item_data['film_id'] = film.id
+                        # Логируем film_id, но не добавляем в item_data
+                        if film:
+                            logging.info(f"Найден film_id: {film.id} для продукта из старой структуры, но не будет добавлен в CompletedOrderItem")
                             
                         completed_item = CompletedOrderItem(**item_data)
                         db.add(completed_item)
