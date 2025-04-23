@@ -58,7 +58,8 @@ async def handle_production_order(message: Message, state: FSMContext):
         )
         
         await message.answer(
-            "Выберите толщину панелей для заказа (мм):",
+            "Для начала выберите толщину панелей для заказа (мм).\n"
+            "После этого вам будут доступны цвета пленки для выбранной толщины:",
             reply_markup=keyboard
         )
         await state.set_state(ProductionOrderStates.waiting_for_panel_thickness)
@@ -119,11 +120,23 @@ async def process_panel_quantity(message: Message, state: FSMContext):
             
         await state.update_data(panel_quantity=quantity)
         
-        # Получаем список доступных цветов пленки
+        # Получаем сохраненные данные
+        data = await state.get_data()
+        selected_thickness = data["panel_thickness"]
+        
+        # Получаем список доступных цветов пленки для выбранной толщины
         db = next(get_db())
         try:
-            films = db.query(Film.code).distinct().all()
-            film_colors = [film[0] for film in films]
+            # Ищем цвета, для которых есть готовая продукция с выбранной толщиной
+            available_films = db.query(Film.code).join(FinishedProduct).filter(
+                FinishedProduct.thickness == selected_thickness
+            ).distinct().all()
+            
+            # Если нет готовой продукции с такой толщиной, показываем все доступные цвета
+            if not available_films:
+                available_films = db.query(Film.code).distinct().all()
+            
+            film_colors = [film[0] for film in available_films]
             
             if not film_colors:
                 await message.answer("В базе нет доступных цветов пленки.")
@@ -134,7 +147,7 @@ async def process_panel_quantity(message: Message, state: FSMContext):
             keyboard.append([KeyboardButton(text="◀️ Назад")])
             
             await message.answer(
-                "Выберите цвет пленки:",
+                f"Выберите цвет пленки для панелей толщиной {selected_thickness} мм:",
                 reply_markup=ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
             )
             await state.set_state(ProductionOrderStates.waiting_for_film_color)
