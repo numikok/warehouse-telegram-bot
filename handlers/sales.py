@@ -1819,8 +1819,21 @@ async def process_film_color(message: Message, state: FSMContext):
         # Сохраняем код пленки
         await state.update_data(film_color=film.code)
         
+        # Расчет возможного количества панелей
+        possible_panels = film.calculate_possible_panels()
+        remaining_meters = film.total_remaining
+        
+        # Формируем сообщение с информацией о пленке и возможном производстве
+        info_text = (
+            f"📋 Информация о выбранной пленке {film.code}:\n\n"
+            f"• Общее количество оставшейся пленки: {remaining_meters:.2f} метров\n"
+            f"• Расход пленки на одну панель: {film.panel_consumption:.2f} метров\n"
+            f"• Возможно произвести панелей: {possible_panels} шт.\n\n"
+            f"Введите количество панелей для производства:"
+        )
+        
         # Запрашиваем количество панелей
-        await message.answer("Введите количество панелей:")
+        await message.answer(info_text)
         await state.set_state(SalesStates.waiting_for_panel_quantity)
     finally:
         db.close()
@@ -1843,6 +1856,22 @@ async def process_panel_quantity(message: Message, state: FSMContext):
             user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
             if not user:
                 await message.answer("❌ Ошибка: пользователь не найден")
+                return
+            
+            # Получаем пленку и проверяем возможное количество панелей
+            film = db.query(Film).filter(Film.code == data['film_color']).first()
+            if not film:
+                await message.answer("❌ Ошибка: пленка не найдена")
+                return
+                
+            # Проверяем, достаточно ли пленки для производства запрошенного количества панелей
+            possible_panels = film.calculate_possible_panels()
+            if quantity > possible_panels:
+                await message.answer(
+                    f"❌ Недостаточно пленки для производства {quantity} панелей.\n"
+                    f"Максимально возможное количество: {possible_panels} панелей.\n"
+                    f"Пожалуйста, введите другое количество:"
+                )
                 return
                 
             # Создаем заказ на производство
