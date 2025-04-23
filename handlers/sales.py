@@ -1662,10 +1662,27 @@ async def handle_production_order(message: Message, state: FSMContext):
             )
             return
         
-        films_info = [f"- {film.code}" for film in films]
+        # Создаем клавиатуру с кодами пленки и кнопкой назад
+        keyboard = []
+        # Размещаем по 2 кнопки в ряд для кодов пленки
+        for i in range(0, len(films), 2):
+            row = []
+            row.append(KeyboardButton(text=films[i].code))
+            if i + 1 < len(films):
+                row.append(KeyboardButton(text=films[i + 1].code))
+            keyboard.append(row)
+        
+        # Добавляем кнопку назад
+        keyboard.append([KeyboardButton(text="◀️ Назад")])
+        
+        reply_markup = ReplyKeyboardMarkup(
+            keyboard=keyboard,
+            resize_keyboard=True
+        )
+        
         await message.answer(
-            "Введите код пленки.\n\nДоступные варианты:\n" + "\n".join(films_info),
-            reply_markup=get_menu_keyboard(MenuState.SALES_ORDER, is_admin_context=is_admin_context)
+            "Выберите код пленки:",
+            reply_markup=reply_markup
         )
         await state.set_state(SalesStates.waiting_for_film_color)
     finally:
@@ -1676,6 +1693,10 @@ async def handle_warehouse_order(message: Message, state: FSMContext):
     if not await check_sales_access(message):
         return
     
+    # Получаем флаг админ-контекста
+    state_data = await state.get_data()
+    is_admin_context = state_data.get("is_admin_context", False)
+    
     await state.set_state(MenuState.SALES_ORDER)
     db = next(get_db())
     try:
@@ -1684,27 +1705,51 @@ async def handle_warehouse_order(message: Message, state: FSMContext):
         if not finished_products:
             await message.answer(
                 "На складе нет готовой продукции.",
-                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
             )
             return
         
-        # Формируем сообщение о доступной продукции
+        # Создаем информационное сообщение
         products_info = []
+        available_films = set()
+        
         for product in finished_products:
-            products_info.append(
-                f"• Панели с пленкой {product.film.code} (толщина: {product.thickness} мм): {product.quantity} шт."
-            )
+            if product.quantity > 0:
+                products_info.append(
+                    f"• Панели с пленкой {product.film.code} (толщина: {product.thickness} мм): {product.quantity} шт."
+                )
+                available_films.add(product.film.code)
         
         if not products_info:
             await message.answer(
                 "На складе нет готовой продукции.",
-                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
             )
             return
         
+        # Создаем клавиатуру с кодами доступных пленок
+        keyboard = []
+        available_films = sorted(list(available_films))
+        
+        # Размещаем по 2 кнопки в ряд для кодов пленки
+        for i in range(0, len(available_films), 2):
+            row = []
+            row.append(KeyboardButton(text=available_films[i]))
+            if i + 1 < len(available_films):
+                row.append(KeyboardButton(text=available_films[i + 1]))
+            keyboard.append(row)
+        
+        # Добавляем кнопку назад
+        keyboard.append([KeyboardButton(text="◀️ Назад")])
+        
+        reply_markup = ReplyKeyboardMarkup(
+            keyboard=keyboard,
+            resize_keyboard=True
+        )
+        
         await message.answer(
-            "Введите код пленки.\n\nДоступные варианты:\n" + "\n".join(products_info),
-            reply_markup=get_menu_keyboard(MenuState.SALES_ORDER)
+            "Доступная продукция на складе:\n\n" + "\n".join(products_info) + "\n\nВыберите код пленки:",
+            reply_markup=reply_markup
         )
         await state.set_state(SalesStates.waiting_for_film_code)
     finally:
