@@ -16,7 +16,7 @@ from navigation import MenuState, get_menu_keyboard, go_back, get_back_keyboard,
 from states import ProductionStates
 from utils import check_production_access, get_role_menu_keyboard
 from handlers.sales import handle_warehouse_order, handle_stock
-from handlers.warehouse import cmd_stock
+from handlers.warehouse import cmd_stock, handle_stock as warehouse_handle_stock
 
 logging.basicConfig(level=logging.INFO)
 
@@ -1961,6 +1961,5 @@ async def process_panel_quantity(message: Message, state: FSMContext):
 
 @router.message(F.text == "📦 Остатки")
 async def handle_stock(message: Message, state: FSMContext):
-    # Просто устанавливаем состояние и вызываем cmd_stock
-    await state.set_state(MenuState.PRODUCTION_MAIN)
-    await cmd_stock(message, state)
+    # Вместо прямого вызова cmd_stock используем новую функцию из warehouse
+    await warehouse_handle_stock(message, state)

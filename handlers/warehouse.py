@@ -347,8 +347,165 @@ async def handle_orders(message: Message, state: FSMContext):
 
 @router.message(F.text == "📦 Остатки")
 async def handle_stock(message: Message, state: FSMContext):
-    await state.set_state(MenuState.WAREHOUSE_STOCK)
+    # Вместо вызова cmd_stock, переходим в меню категорий остатков
+    await state.set_state(MenuState.INVENTORY_CATEGORIES)
+    
+    # Получаем текущую роль пользователя
+    db = next(get_db())
+    try:
+        user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
+        user_role = user.role if user else UserRole.NONE
+        
+        # Сохраняем роль и исходное меню, чтобы знать, куда возвращаться
+        if user_role == UserRole.WAREHOUSE:
+            await state.update_data(source_menu=MenuState.WAREHOUSE_MAIN)
+        elif user_role == UserRole.PRODUCTION:
+            await state.update_data(source_menu=MenuState.PRODUCTION_MAIN)
+        elif user_role == UserRole.SUPER_ADMIN:
+            await state.update_data(source_menu=MenuState.SUPER_ADMIN_MAIN)
+        else:
+            await state.update_data(source_menu=MenuState.WAREHOUSE_MAIN)  # По умолчанию
+        
+        # Получаем клавиатуру для меню категорий
+        keyboard = get_menu_keyboard(MenuState.INVENTORY_CATEGORIES)
+        
+        await message.answer(
+            "Выберите категорию остатков для просмотра:",
+            reply_markup=keyboard
+        )
+    finally:
+        db.close()
+
+# Обработчик для всех остатков сразу
+@router.message(F.text == "📊 Все остатки")
+async def handle_all_stock(message: Message, state: FSMContext):
+    # Вызываем старую функцию показа всех остатков
     await cmd_stock(message, state)
+
+# Обработчик для готовой продукции
+@router.message(F.text == "✅ Готовая продукция")
+async def handle_finished_products(message: Message, state: FSMContext):
+    await state.set_state(MenuState.INVENTORY_FINISHED_PRODUCTS)
+    
+    db = next(get_db())
+    try:
+        # Получаем список готовой продукции
+        finished_products = db.query(FinishedProduct).join(Film).all()
+        
+        response = "✅ Готовая продукция на складе:\n\n"
+        if finished_products:
+            for product in finished_products:
+                if product.quantity > 0:
+                    response += f"- {product.film.code} (толщина {product.thickness} мм): {product.quantity} шт.\n"
+        else:
+            response += "Нет в наличии\n"
+        
+        # Возвращаем клавиатуру для возврата в меню категорий
+        keyboard = get_menu_keyboard(MenuState.INVENTORY_FINISHED_PRODUCTS)
+        await message.answer(response, reply_markup=keyboard)
+    finally:
+        db.close()
+
+# Обработчик для пленки
+@router.message(F.text == "🎞 Пленка")
+async def handle_films(message: Message, state: FSMContext):
+    await state.set_state(MenuState.INVENTORY_FILMS)
+    
+    db = next(get_db())
+    try:
+        # Получаем список пленок
+        films = db.query(Film).all()
+        
+        response = "🎞 Пленки на складе:\n\n"
+        if films:
+            for film in films:
+                meters_per_roll = film.meters_per_roll or 50.0  # По умолчанию 50 метров в рулоне
+                rolls = film.total_remaining / meters_per_roll if meters_per_roll > 0 else 0
+                response += (
+                    f"- {film.code}:\n"
+                    f"  • Рулонов: {rolls:.1f}\n"
+                    f"  • Общая длина: {film.total_remaining:.2f} м\n"
+                    f"  • Можно произвести панелей: {film.calculate_possible_panels()}\n\n"
+                )
+        else:
+            response += "Нет в наличии\n"
+        
+        # Возвращаем клавиатуру для возврата в меню категорий
+        keyboard = get_menu_keyboard(MenuState.INVENTORY_FILMS)
+        await message.answer(response, reply_markup=keyboard)
+    finally:
+        db.close()
+
+# Обработчик для панелей
+@router.message(F.text == "🪵 Панели")
+async def handle_panels(message: Message, state: FSMContext):
+    await state.set_state(MenuState.INVENTORY_PANELS)
+    
+    db = next(get_db())
+    try:
+        # Получаем список панелей
+        panels = db.query(Panel).all()
+        
+        response = "🪵 Пустые панели на складе:\n\n"
+        if panels:
+            for panel in panels:
+                response += f"- Толщина {panel.thickness} мм: {panel.quantity} шт.\n"
+        else:
+            response += "Нет в наличии\n"
+        
+        # Возвращаем клавиатуру для возврата в меню категорий
+        keyboard = get_menu_keyboard(MenuState.INVENTORY_PANELS)
+        await message.answer(response, reply_markup=keyboard)
+    finally:
+        db.close()
+
+# Обработчик для стыков
+@router.message(F.text == "🔄 Стыки")
+async def handle_joints(message: Message, state: FSMContext):
+    await state.set_state(MenuState.INVENTORY_JOINTS)
+    
+    db = next(get_db())
+    try:
+        # Получаем список стыков
+        joints = db.query(Joint).all()
+        
+        response = "🔄 Стыки на складе:\n\n"
+        if joints:
+            for joint in joints:
+                response += (
+                    f"- {joint.color} ({joint.type.value}, {joint.thickness} мм):\n"
+                    f"  • Количество: {joint.quantity}\n"
+                )
+        else:
+            response += "Нет в наличии\n"
+        
+        # Возвращаем клавиатуру для возврата в меню категорий
+        keyboard = get_menu_keyboard(MenuState.INVENTORY_JOINTS)
+        await message.answer(response, reply_markup=keyboard)
+    finally:
+        db.close()
+
+# Обработчик для клея
+@router.message(F.text == "🧪 Клей")
+async def handle_glue(message: Message, state: FSMContext):
+    await state.set_state(MenuState.INVENTORY_GLUE)
+    
+    db = next(get_db())
+    try:
+        # Получаем информацию о клее
+        glue = db.query(Glue).first()
+        
+        response = "🧪 Клей на складе:\n\n"
+        if glue:
+            response += f"Количество: {glue.quantity}\n"
+        else:
+            response += "Нет в наличии\n"
+        
+        # Возвращаем клавиатуру для возврата в меню категорий
+        keyboard = get_menu_keyboard(MenuState.INVENTORY_GLUE)
+        await message.answer(response, reply_markup=keyboard)
+    finally:
+        db.close()
 
 @router.message(Command("start"))
 async def cmd_start(message: Message, state: FSMContext):

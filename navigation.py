@@ -37,6 +37,14 @@ class MenuState(str, Enum):
     SUPER_ADMIN_WAREHOUSE = "super_admin_warehouse"
     SUPER_ADMIN_PRODUCTION = "super_admin_production"
     SUPER_ADMIN_SALES = "super_admin_sales"
+    
+    # Инвентарь - новые состояния для всех ролей
+    INVENTORY_CATEGORIES = "inventory_categories"
+    INVENTORY_FINISHED_PRODUCTS = "inventory_finished_products"
+    INVENTORY_FILMS = "inventory_films"
+    INVENTORY_PANELS = "inventory_panels"
+    INVENTORY_JOINTS = "inventory_joints"
+    INVENTORY_GLUE = "inventory_glue"
 
 # Структура навигации: какое меню куда ведет при нажатии "Назад"
 MENU_NAVIGATION = {
@@ -53,6 +61,14 @@ MENU_NAVIGATION = {
     MenuState.WAREHOUSE_INCOME: MenuState.WAREHOUSE_MAIN,
     MenuState.WAREHOUSE_MATERIALS: MenuState.WAREHOUSE_MAIN,
     MenuState.WAREHOUSE_MAIN: MenuState.SUPER_ADMIN_MAIN,  # Для возврата из роли склада в супер админа
+    
+    # Инвентарь - новые состояния для всех ролей
+    MenuState.INVENTORY_CATEGORIES: MenuState.WAREHOUSE_MAIN,  # По умолчанию возврат в меню склада
+    MenuState.INVENTORY_FINISHED_PRODUCTS: MenuState.INVENTORY_CATEGORIES,
+    MenuState.INVENTORY_FILMS: MenuState.INVENTORY_CATEGORIES,
+    MenuState.INVENTORY_PANELS: MenuState.INVENTORY_CATEGORIES,
+    MenuState.INVENTORY_JOINTS: MenuState.INVENTORY_CATEGORIES,
+    MenuState.INVENTORY_GLUE: MenuState.INVENTORY_CATEGORIES,
     
     # Продажи
     MenuState.SALES_ORDER: MenuState.SALES_MAIN,
@@ -176,6 +192,34 @@ def get_menu_keyboard(menu_state: MenuState, is_admin_context: bool = False) -> 
             [KeyboardButton(text="Пустые панели")],
             [KeyboardButton(text="Стыки")],
             [KeyboardButton(text="Клей")],
+            [KeyboardButton(text="◀️ Назад")]
+        ],
+        
+        # Новые меню для категорий инвентаря
+        MenuState.INVENTORY_CATEGORIES: [
+            [KeyboardButton(text="✅ Готовая продукция")],
+            [KeyboardButton(text="🎞 Пленка")],
+            [KeyboardButton(text="🪵 Панели")],
+            [KeyboardButton(text="🔄 Стыки")],
+            [KeyboardButton(text="🧪 Клей")],
+            [KeyboardButton(text="📊 Все остатки")],
+            [KeyboardButton(text="◀️ Назад")]
+        ],
+        
+        # Каждая категория инвентаря просто имеет кнопку назад
+        MenuState.INVENTORY_FINISHED_PRODUCTS: [
+            [KeyboardButton(text="◀️ Назад")]
+        ],
+        MenuState.INVENTORY_FILMS: [
+            [KeyboardButton(text="◀️ Назад")]
+        ],
+        MenuState.INVENTORY_PANELS: [
+            [KeyboardButton(text="◀️ Назад")]
+        ],
+        MenuState.INVENTORY_JOINTS: [
+            [KeyboardButton(text="◀️ Назад")]
+        ],
+        MenuState.INVENTORY_GLUE: [
             [KeyboardButton(text="◀️ Назад")]
         ],
         

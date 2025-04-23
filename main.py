@@ -317,7 +317,7 @@ async def button_order(message: Message, state: FSMContext):
 
 @dp.message(F.text == "📦 Количество готовой продукции")
 async def button_stock(message: Message, state: FSMContext):
-    await handle_stock(message, state)
+    await warehouse.handle_finished_products(message, state)
 
 @dp.message(F.text == "👥 Пользователи")
 async def button_users(message: Message, state: FSMContext):
@@ -329,17 +329,13 @@ async def button_reports(message: Message, state: FSMContext):
 
 @dp.message(F.text == "📦 Остатки")
 async def button_warehouse_stock(message: Message, state: FSMContext):
-    await state.set_state(MenuState.WAREHOUSE_STOCK)
-    await warehouse.cmd_stock(message, state)
+    await warehouse.handle_stock(message, state)
 
 @dp.message(F.text == "📊 Остатки")
 async def button_production_stock(message: Message, state: FSMContext):
     logging.info(f"Нажата кнопка 'Остатки' пользователем {message.from_user.id}")
     
-    # Устанавливаем состояние для просмотра остатков
-    await state.set_state(MenuState.PRODUCTION_MAIN)
-    # Для всех пользователей, нажавших на "📊 Остатки", показываем остатки
-    await warehouse.cmd_stock(message, state)
+    await warehouse.handle_stock(message, state)
 
 @dp.message(F.text == "📦 Мои заказы")
 async def button_my_orders(message: Message, state: FSMContext):

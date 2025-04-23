@@ -3,13 +3,14 @@ from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKey
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from models import User, UserRole, Operation, Order, CompletedOrder, Film, Joint, Glue, ProductionOrder, OrderStatus
+from models import User, UserRole, Operation, Order, CompletedOrder, Film, Joint, Glue, ProductionOrder, OrderStatus, MenuState, UserSource, Role, Panel, FinishedProduct, OperationType, JointType
 from database import get_db
 import json
 from datetime import datetime, timedelta
-from navigation import MenuState, get_menu_keyboard, go_back
+from navigation import get_menu_keyboard, go_back
 import logging
 import re
+from handlers.warehouse import handle_stock
 
 router = Router()
 
@@ -189,33 +190,8 @@ async def handle_back(message: Message, state: FSMContext):
 # Обработчики отчетов
 @router.message(F.text == "📦 Остатки материалов")
 async def handle_materials_report(message: Message, state: FSMContext):
-    db = next(get_db())
-    try:
-        user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
-        if not user or user.role != UserRole.SUPER_ADMIN:
-            await message.answer("У вас нет прав для выполнения этой команды.")
-            return
-        
-        # Получаем остатки материалов
-        films = db.query(Film).all()
-        joints = db.query(Joint).all()
-        glue = db.query(Glue).first()
-        
-        report = "📊 Остатки материалов:\n\n"
-        
-        report += "🎨 Пленка:\n"
-        for film in films:
-            report += f"- {film.code}: {film.total_remaining}м\n"
-        
-        report += "\n⚙️ Стыки:\n"
-        for joint in joints:
-            report += f"- {joint.color} ({joint.type.value}): {joint.quantity} шт.\n"
-        
-        report += f"\n🧪 Клей: {glue.quantity if glue else 0} шт."
-        
-        await message.answer(report, reply_markup=get_menu_keyboard(MenuState.SUPER_ADMIN_REPORTS))
-    finally:
-        db.close()
+    # Перенаправляем запрос к новой функции категорий инвентаря
+    await handle_stock(message, state)
 
 @router.message(F.text == "💰 Статистика продаж")
 async def handle_sales_report(message: Message, state: FSMContext):
@@ -748,7 +724,7 @@ async def process_role_selection(message: Message, state: FSMContext):
                     keyboard=[
                         [KeyboardButton(text="👤 Назначить роль")],
                         [KeyboardButton(text="📋 Список пользователей")],
-                        [KeyboardButton(text="🔄 Сбросить роль пользователя")],
+                        [KeyboardButton(text="�� Сбросить роль пользователя")],
                         [KeyboardButton(text="◀️ Назад")]
                     ],
                     resize_keyboard=True
