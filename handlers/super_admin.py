@@ -3,11 +3,11 @@ from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKey
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from models import User, UserRole, Operation, Order, CompletedOrder, Film, Joint, Glue, ProductionOrder, OrderStatus, MenuState, UserSource, Role, Panel, FinishedProduct, OperationType, JointType
+from models import User, UserRole, Operation, Order, CompletedOrder, Film, Joint, Glue, ProductionOrder, OrderStatus, UserSource, Role, Panel, FinishedProduct, OperationType, JointType
 from database import get_db
 import json
 from datetime import datetime, timedelta
-from navigation import get_menu_keyboard, go_back
+from navigation import MenuState, get_menu_keyboard, go_back
 import logging
 import re
 from handlers.warehouse import handle_stock
@@ -724,7 +724,7 @@ async def process_role_selection(message: Message, state: FSMContext):
                     keyboard=[
                         [KeyboardButton(text="👤 Назначить роль")],
                         [KeyboardButton(text="📋 Список пользователей")],
-                        [KeyboardButton(text="�� Сбросить роль пользователя")],
+                        [KeyboardButton(text="🔄 Сбросить роль пользователя")],
                         [KeyboardButton(text="◀️ Назад")]
                     ],
                     resize_keyboard=True
