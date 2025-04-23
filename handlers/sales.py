@@ -1652,41 +1652,95 @@ async def handle_production_order(message: Message, state: FSMContext):
     is_admin_context = state_data.get("is_admin_context", False)
     
     await state.set_state(MenuState.SALES_ORDER)
-    db = next(get_db())
-    try:
-        films = db.query(Film).all()
-        if not films:
-            await message.answer(
-                "В базе нет пленки.",
-                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
-            )
-            return
-        
-        # Создаем клавиатуру с кодами пленки и кнопкой назад
-        keyboard = []
-        # Размещаем по 2 кнопки в ряд для кодов пленки
-        for i in range(0, len(films), 2):
-            row = []
-            row.append(KeyboardButton(text=films[i].code))
-            if i + 1 < len(films):
-                row.append(KeyboardButton(text=films[i + 1].code))
-            keyboard.append(row)
-        
-        # Добавляем кнопку назад
-        keyboard.append([KeyboardButton(text="◀️ Назад")])
-        
-        reply_markup = ReplyKeyboardMarkup(
-            keyboard=keyboard,
-            resize_keyboard=True
-        )
-        
+    
+    # Сначала предлагаем выбрать толщину панели
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="0.5")],
+            [KeyboardButton(text="0.8")],
+            [KeyboardButton(text="◀️ Назад")]
+        ],
+        resize_keyboard=True
+    )
+    
+    await message.answer(
+        "Для начала выберите толщину панелей для заказа (мм).\n"
+        "После этого вам будут доступны цвета пленки для выбранной толщины:",
+        reply_markup=keyboard
+    )
+    
+    # Создаем новое состояние для выбора толщины
+    await state.set_state(SalesStates.waiting_for_panel_thickness)
+
+# Новый обработчик для выбора толщины панели
+@router.message(SalesStates.waiting_for_panel_thickness)
+async def process_panel_thickness(message: Message, state: FSMContext):
+    """Обработка выбора толщины панели"""
+    if message.text == "◀️ Назад":
+        # Возвращаемся к главному меню
+        next_menu, keyboard = await go_back(state, UserRole.SALES_MANAGER)
+        await state.set_state(next_menu)
         await message.answer(
-            "Выберите код пленки:",
-            reply_markup=reply_markup
+            "Выберите действие:",
+            reply_markup=keyboard
         )
-        await state.set_state(SalesStates.waiting_for_film_color)
-    finally:
-        db.close()
+        return
+    
+    try:
+        thickness = float(message.text)
+        if thickness not in [0.5, 0.8]:
+            await message.answer("Пожалуйста, выберите толщину 0.5 или 0.8 мм.")
+            return
+            
+        # Сохраняем выбранную толщину
+        await state.update_data(panel_thickness=thickness)
+        
+        # Предлагаем цвета пленки в зависимости от выбранной толщины
+        db = next(get_db())
+        try:
+            # Ищем цвета, для которых есть готовая продукция с выбранной толщиной
+            available_films = db.query(Film).join(FinishedProduct).filter(
+                FinishedProduct.thickness == thickness
+            ).distinct().all()
+            
+            # Если нет готовой продукции с такой толщиной, показываем все доступные цвета
+            if not available_films:
+                available_films = db.query(Film).all()
+            
+            if not available_films:
+                await message.answer(
+                    "В базе нет пленки.",
+                    reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=False)
+                )
+                return
+            
+            # Создаем клавиатуру с кодами пленки и кнопкой назад
+            keyboard = []
+            # Размещаем по 2 кнопки в ряд для кодов пленки
+            for i in range(0, len(available_films), 2):
+                row = []
+                row.append(KeyboardButton(text=available_films[i].code))
+                if i + 1 < len(available_films):
+                    row.append(KeyboardButton(text=available_films[i + 1].code))
+                keyboard.append(row)
+            
+            # Добавляем кнопку назад
+            keyboard.append([KeyboardButton(text="◀️ Назад")])
+            
+            reply_markup = ReplyKeyboardMarkup(
+                keyboard=keyboard,
+                resize_keyboard=True
+            )
+            
+            await message.answer(
+                f"Выберите код пленки для панелей толщиной {thickness} мм:",
+                reply_markup=reply_markup
+            )
+            await state.set_state(SalesStates.waiting_for_film_color)
+        finally:
+            db.close()
+    except ValueError:
+        await message.answer("Пожалуйста, введите корректное число (0.5 или 0.8).")
 
 @router.message(F.text == "📦 Заказать на склад")
 async def handle_warehouse_order(message: Message, state: FSMContext):
@@ -1809,8 +1863,30 @@ async def handle_back(message: Message, state: FSMContext):
 @router.message(SalesStates.waiting_for_film_color)
 async def process_film_color(message: Message, state: FSMContext):
     """Обработка ввода кода пленки"""
+    if message.text == "◀️ Назад":
+        # Возвращаемся к выбору толщины панели
+        keyboard = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="0.5")],
+                [KeyboardButton(text="0.8")],
+                [KeyboardButton(text="◀️ Назад")]
+            ],
+            resize_keyboard=True
+        )
+        
+        await message.answer(
+            "Выберите толщину панелей для заказа (мм):",
+            reply_markup=keyboard
+        )
+        await state.set_state(SalesStates.waiting_for_panel_thickness)
+        return
+    
     db = next(get_db())
     try:
+        # Получаем данные из состояния
+        data = await state.get_data()
+        panel_thickness = data.get("panel_thickness", 0.5)  # По умолчанию 0.5 если не указано
+        
         film = db.query(Film).filter(Film.code == message.text.strip()).first()
         if not film:
             await message.answer("❌ Пленка с таким кодом не найдена. Пожалуйста, выберите из списка:")
@@ -1826,6 +1902,7 @@ async def process_film_color(message: Message, state: FSMContext):
         # Формируем сообщение с информацией о пленке и возможном производстве
         info_text = (
             f"📋 Информация о выбранной пленке {film.code}:\n\n"
+            f"• Толщина панелей: {panel_thickness} мм\n"
             f"• Общее количество оставшейся пленки: {remaining_meters:.2f} метров\n"
             f"• Расход пленки на одну панель: {film.panel_consumption:.2f} метров\n"
             f"• Возможно произвести панелей: {possible_panels} шт.\n\n"
@@ -1841,6 +1918,57 @@ async def process_film_color(message: Message, state: FSMContext):
 @router.message(SalesStates.waiting_for_panel_quantity)
 async def process_panel_quantity(message: Message, state: FSMContext):
     """Обработка ввода количества панелей и создание заказа"""
+    if message.text == "◀️ Назад":
+        # Возвращаемся к выбору цвета пленки
+        data = await state.get_data()
+        thickness = data.get("panel_thickness", 0.5)  # По умолчанию 0.5 если не указано
+        
+        # Предлагаем цвета пленки в зависимости от выбранной толщины
+        db = next(get_db())
+        try:
+            # Ищем цвета, для которых есть готовая продукция с выбранной толщиной
+            available_films = db.query(Film).join(FinishedProduct).filter(
+                FinishedProduct.thickness == thickness
+            ).distinct().all()
+            
+            # Если нет готовой продукции с такой толщиной, показываем все доступные цвета
+            if not available_films:
+                available_films = db.query(Film).all()
+            
+            if not available_films:
+                await message.answer(
+                    "В базе нет пленки.",
+                    reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=False)
+                )
+                return
+            
+            # Создаем клавиатуру с кодами пленки и кнопкой назад
+            keyboard = []
+            # Размещаем по 2 кнопки в ряд для кодов пленки
+            for i in range(0, len(available_films), 2):
+                row = []
+                row.append(KeyboardButton(text=available_films[i].code))
+                if i + 1 < len(available_films):
+                    row.append(KeyboardButton(text=available_films[i + 1].code))
+                keyboard.append(row)
+            
+            # Добавляем кнопку назад
+            keyboard.append([KeyboardButton(text="◀️ Назад")])
+            
+            reply_markup = ReplyKeyboardMarkup(
+                keyboard=keyboard,
+                resize_keyboard=True
+            )
+            
+            await message.answer(
+                f"Выберите код пленки для панелей толщиной {thickness} мм:",
+                reply_markup=reply_markup
+            )
+            await state.set_state(SalesStates.waiting_for_film_color)
+        finally:
+            db.close()
+        return
+    
     try:
         quantity = int(message.text.strip())
         if quantity <= 0:
@@ -1874,11 +2002,15 @@ async def process_panel_quantity(message: Message, state: FSMContext):
                 )
                 return
                 
+            # Получаем толщину панели из данных состояния
+            panel_thickness = data.get("panel_thickness", 0.5)  # По умолчанию 0.5 если не указано
+                
             # Создаем заказ на производство
             production_order = ProductionOrder(
                 manager_id=user.id,
                 film_color=data['film_color'],
                 panel_quantity=quantity,
+                panel_thickness=panel_thickness,  # Добавляем толщину панели в заказ
                 status="new"
             )
             
@@ -1888,6 +2020,7 @@ async def process_panel_quantity(message: Message, state: FSMContext):
             # Формируем сообщение о созданном заказе
             order_text = (
                 f"✅ Заказ на производство #{production_order.id} успешно создан!\n\n"
+                f"Толщина панелей: {panel_thickness} мм\n"  # Добавляем информацию о толщине
                 f"Пленка: {production_order.film_color}\n"
                 f"Количество панелей: {production_order.panel_quantity}"
             )
