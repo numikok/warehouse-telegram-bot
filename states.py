@@ -72,6 +72,7 @@ class SalesStates(StatesGroup):
     waiting_for_film_color = State()
     waiting_for_panel_quantity = State()
     waiting_for_panels_count = State()
+    waiting_for_panel_thickness = State()
     
     # Состояния для множественного выбора продуктов
     selecting_products = State()
