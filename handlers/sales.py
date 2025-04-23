@@ -1695,19 +1695,13 @@ async def process_panel_thickness(message: Message, state: FSMContext):
         # Сохраняем выбранную толщину
         await state.update_data(panel_thickness=thickness)
         
-        # Предлагаем цвета пленки в зависимости от выбранной толщины
+        # Показываем все доступные цвета пленки, независимо от толщины
         db = next(get_db())
         try:
-            # Ищем цвета, для которых есть готовая продукция с выбранной толщиной
-            available_films = db.query(Film).join(FinishedProduct).filter(
-                FinishedProduct.thickness == thickness
-            ).distinct().all()
+            # Получаем все доступные цвета пленки
+            films = db.query(Film).all()
             
-            # Если нет готовой продукции с такой толщиной, показываем все доступные цвета
-            if not available_films:
-                available_films = db.query(Film).all()
-            
-            if not available_films:
+            if not films:
                 await message.answer(
                     "В базе нет пленки.",
                     reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=False)
@@ -1717,11 +1711,11 @@ async def process_panel_thickness(message: Message, state: FSMContext):
             # Создаем клавиатуру с кодами пленки и кнопкой назад
             keyboard = []
             # Размещаем по 2 кнопки в ряд для кодов пленки
-            for i in range(0, len(available_films), 2):
+            for i in range(0, len(films), 2):
                 row = []
-                row.append(KeyboardButton(text=available_films[i].code))
-                if i + 1 < len(available_films):
-                    row.append(KeyboardButton(text=available_films[i + 1].code))
+                row.append(KeyboardButton(text=films[i].code))
+                if i + 1 < len(films):
+                    row.append(KeyboardButton(text=films[i + 1].code))
                 keyboard.append(row)
             
             # Добавляем кнопку назад
@@ -1923,19 +1917,13 @@ async def process_panel_quantity(message: Message, state: FSMContext):
         data = await state.get_data()
         thickness = data.get("panel_thickness", 0.5)  # По умолчанию 0.5 если не указано
         
-        # Предлагаем цвета пленки в зависимости от выбранной толщины
+        # Показываем все доступные цвета пленки
         db = next(get_db())
         try:
-            # Ищем цвета, для которых есть готовая продукция с выбранной толщиной
-            available_films = db.query(Film).join(FinishedProduct).filter(
-                FinishedProduct.thickness == thickness
-            ).distinct().all()
+            # Получаем все цвета пленки
+            films = db.query(Film).all()
             
-            # Если нет готовой продукции с такой толщиной, показываем все доступные цвета
-            if not available_films:
-                available_films = db.query(Film).all()
-            
-            if not available_films:
+            if not films:
                 await message.answer(
                     "В базе нет пленки.",
                     reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=False)
@@ -1945,11 +1933,11 @@ async def process_panel_quantity(message: Message, state: FSMContext):
             # Создаем клавиатуру с кодами пленки и кнопкой назад
             keyboard = []
             # Размещаем по 2 кнопки в ряд для кодов пленки
-            for i in range(0, len(available_films), 2):
+            for i in range(0, len(films), 2):
                 row = []
-                row.append(KeyboardButton(text=available_films[i].code))
-                if i + 1 < len(available_films):
-                    row.append(KeyboardButton(text=available_films[i + 1].code))
+                row.append(KeyboardButton(text=films[i].code))
+                if i + 1 < len(films):
+                    row.append(KeyboardButton(text=films[i + 1].code))
                 keyboard.append(row)
             
             # Добавляем кнопку назад
