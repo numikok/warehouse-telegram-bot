@@ -16,16 +16,21 @@ class ProductionOrderStates(StatesGroup):
     waiting_for_panel_quantity = State()
     waiting_for_film_color = State()
 
-async def notify_production_users(bot, order_id: int, panel_quantity: int, panel_thickness: float, film_color: str):
+async def notify_production_users(bot, order_id: int, panel_quantity: int, panel_thickness: float, film_color: str, manager_id: int):
     """Уведомляет всех пользователей с ролью PRODUCTION о новом заказе."""
     db = next(get_db())
     try:
         production_users = db.query(User).filter(User.role == UserRole.PRODUCTION).all()
         
+        # Получаем информацию о менеджере
+        manager = db.query(User).filter(User.id == manager_id).first()
+        manager_name = manager.username if manager else "Неизвестный менеджер"
+        
         for user in production_users:
             await bot.send_message(
                 user.telegram_id,
                 f"📢 Новый заказ на производство #{order_id}!\n"
+                f"Менеджер: {manager_name}\n"
                 f"Толщина панелей: {panel_thickness} мм\n"
                 f"Количество панелей: {panel_quantity}\n"
                 f"Цвет пленки: {film_color}"
@@ -170,7 +175,8 @@ async def process_film_color(message: Message, state: FSMContext):
             order.id,
             data["panel_quantity"],
             data["panel_thickness"],
-            message.text
+            message.text,
+            user.id  # Передаем id менеджера для отображения в уведомлении
         )
         
         await message.answer(
@@ -215,9 +221,14 @@ async def handle_my_orders(message: Message, state: FSMContext):
         # Формируем сообщение со списком заказов
         message_text = "📋 Активные заказы на производство:\n\n"
         for order in orders:
+            # Получаем информацию о менеджере
+            manager = db.query(User).filter(User.id == order.manager_id).first()
+            manager_name = manager.username if manager else "Неизвестный менеджер"
+            
             status = "🆕 Новый" if order.status == OrderStatus.NEW else "🔄 В работе"
             message_text += (
                 f"Заказ #{order.id} ({status})\n"
+                f"Менеджер: {manager_name}\n"
                 f"Толщина панелей: {order.panel_thickness} мм\n"
                 f"Количество панелей: {order.panel_quantity}\n"
                 f"Цвет пленки: {order.film_color}\n"
