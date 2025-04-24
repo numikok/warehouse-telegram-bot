@@ -652,21 +652,28 @@ async def process_panel_consumption(message: Message, state: FSMContext):
 
 # Обработка прихода стыков
 @router.message(F.text == "⚙️ Стык")
-async def handle_joint_income(message: Message, state: FSMContext):
-    # Проверяем, что мы в состоянии приема материалов
+async def handle_joint_button(message: Message, state: FSMContext):
+    # Получаем текущее состояние
     current_state = await state.get_state()
     logging.info(f"Нажата кнопка 'Стык', текущее состояние: {current_state}")
     
-    # Пропускаем обработку, если мы в любом состоянии, кроме меню материалов
-    if current_state != MenuState.PRODUCTION_MATERIALS:
-        logging.info(f"Пропускаем обработку, так как не в режиме добавления материалов")
+    # Проверяем, что мы в состоянии приема материалов
+    if current_state == MenuState.PRODUCTION_MATERIALS:
+        logging.info("Обработка нажатия Стык в режиме приема материалов")
+        await message.answer(
+            "Выберите тип стыка:",
+            reply_markup=get_joint_type_keyboard()
+        )
+        await state.set_state(ProductionStates.waiting_for_joint_type)
         return
         
-    await message.answer(
-        "Выберите тип стыка:",
-        reply_markup=get_joint_type_keyboard()
-    )
-    await state.set_state(ProductionStates.waiting_for_joint_type)
+    # Если мы в меню брака
+    if current_state == ProductionStates.waiting_for_defect_type:
+        logging.info("Обработка нажатия Стык в режиме брака")
+        await process_joint_defect(message, state)
+        return
+        
+    logging.info(f"Пропускаем обработку, так как состояние {current_state} не подходит")
 
 @router.message(ProductionStates.waiting_for_joint_type)
 async def process_joint_type(message: Message, state: FSMContext):
@@ -943,24 +950,32 @@ async def process_joint_quantity(message: Message, state: FSMContext):
 
 # Обработка прихода клея
 @router.message(F.text == "🧴 Клей")
-async def handle_glue_income(message: Message, state: FSMContext):
-    # Проверяем, что мы в состоянии приема материалов
+async def handle_glue_button(message: Message, state: FSMContext):
+    # Получаем текущее состояние
     current_state = await state.get_state()
     logging.info(f"Нажата кнопка 'Клей', текущее состояние: {current_state}")
     
-    # Пропускаем обработку, если мы в любом состоянии, кроме меню материалов
-    if current_state != MenuState.PRODUCTION_MATERIALS:
-        logging.info(f"Пропускаем обработку, так как не в режиме добавления материалов")
+    # Проверяем, что мы в состоянии приема материалов
+    if current_state == MenuState.PRODUCTION_MATERIALS:
+        logging.info("Обработка нажатия Клей в режиме приема материалов")
+        # Копируем логику из handle_glue_income
+        await message.answer(
+            "Введите количество клея (в штуках) для добавления:",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="◀️ Назад")]],
+                resize_keyboard=True
+            )
+        )
+        await state.set_state(ProductionStates.waiting_for_glue_quantity)
         return
         
-    await message.answer(
-        "Введите количество клея (в штуках):",
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="◀️ Назад")]],
-            resize_keyboard=True
-        )
-    )
-    await state.set_state(ProductionStates.waiting_for_glue_quantity)
+    # Если мы в меню брака
+    if current_state == ProductionStates.waiting_for_defect_type:
+        logging.info("Обработка нажатия Клей в режиме брака")
+        await process_glue_defect(message, state)
+        return
+        
+    logging.info(f"Пропускаем обработку, так как состояние {current_state} не подходит")
 
 @router.message(ProductionStates.waiting_for_glue_quantity)
 async def process_glue_quantity(message: Message, state: FSMContext):
@@ -1614,7 +1629,7 @@ async def handle_panel(message: Message, state: FSMContext):
     logging.info(f"Установлено состояние waiting_for_panel_thickness")
 
 @router.message(ProductionStates.waiting_for_defect_type, F.text == "⚙️ Стык")
-async def handle_joint_defect(message: Message, state: FSMContext):
+async def process_joint_defect(message: Message, state: FSMContext):
     logging.info("Специальный обработчик для брака стыков вызван")
     
     db = next(get_db())
@@ -1662,7 +1677,7 @@ async def handle_joint_defect(message: Message, state: FSMContext):
         db.close()
 
 @router.message(ProductionStates.waiting_for_defect_type, F.text == "🧴 Клей")
-async def handle_glue_defect(message: Message, state: FSMContext):
+async def process_glue_defect(message: Message, state: FSMContext):
     logging.info("Специальный обработчик для брака клея вызван")
     
     # Сразу запрашиваем количество бракованного клея
@@ -2068,57 +2083,22 @@ async def process_defect_joint_quantity(message: Message, state: FSMContext):
 # Этот обработчик должен быть ПОСЛЕДНИМ в файле
 @router.message(ProductionStates.waiting_for_defect_type)
 async def debug_defect_type_handler(message: Message, state: FSMContext):
-    logging.info(f"Получено сообщение в состоянии waiting_for_defect_type: '{message.text}'")
+    logging.info(f"Обработчик по умолчанию для кнопок типа брака, получено: '{message.text}'")
     
-    # Если это нажатие кнопки "Назад", обрабатываем возврат в меню
-    if message.text == "◀️ Назад":
-        logging.info("Возврат в главное меню производства")
-        await state.set_state(MenuState.PRODUCTION_MAIN)
-        await message.answer(
-            "Выберите действие:",
-            reply_markup=get_menu_keyboard(MenuState.PRODUCTION_MAIN)
-        )
-        return
-        
-    # Проверяем, соответствует ли сообщение какому-то из ожидаемых типов брака
+    # Проверяем что у нас запрос на брак с выбором типа
     if message.text == "🪵 Панель":
-        logging.info("Обнаружена кнопка 'Панель', вызываем обработчик вручную")
+        # Этот случай должен быть перехвачен специфическим обработчиком, но на всякий случай:
+        logging.info("Вызываем обработку для панели")
         await handle_panel_defect(message, state)
     elif message.text == "🎨 Пленка":
-        logging.info("Обнаружена кнопка 'Пленка', вызываем обработчик вручную")
+        # Вызываем обработчик для пленки
+        logging.info("Вызываем обработку для пленки")
         try:
             await handle_film_defect(message, state)
-            logging.info("Обработчик handle_film_defect успешно выполнен")
         except Exception as e:
-            logging.error(f"Ошибка при вызове handle_film_defect: {str(e)}")
-            # Запасной вариант - показать список пленок напрямую
+            logging.error(f"Ошибка при обработке брака пленки: {str(e)}")
             db = next(get_db())
             try:
-                films = db.query(Film).all()
-                films_list = [f"- {film.code} (остаток: {film.total_remaining} м)" for film in films]
-                
-                await state.update_data(defect_type="film")
-                await state.set_state(ProductionStates.waiting_for_defect_film_color)
-                
-                keyboard = ReplyKeyboardMarkup(
-                    keyboard=[[KeyboardButton(text="◀️ Назад")]],
-                    resize_keyboard=True
-                )
-                
-                if not films:
-                    await message.answer(
-                        "В системе нет ни одной пленки. Сначала добавьте пленку через меню 'Приход сырья'.",
-                        reply_markup=keyboard
-                    )
-                    return
-                
-                films_text = "\n".join(films_list)
-                await message.answer(
-                    f"Выберите цвет/код бракованной пленки из списка:\n\nДоступные варианты:\n{films_text}",
-                    reply_markup=keyboard
-                )
-            except Exception as db_error:
-                logging.error(f"Ошибка при обработке брака пленки: {str(db_error)}")
                 await message.answer(
                     "Произошла ошибка при обработке брака пленки. Пожалуйста, попробуйте снова.",
                     reply_markup=get_menu_keyboard(MenuState.PRODUCTION_MAIN)
@@ -2127,10 +2107,10 @@ async def debug_defect_type_handler(message: Message, state: FSMContext):
                 db.close()
     elif message.text == "⚙️ Стык":
         logging.info("Обнаружена кнопка 'Стык', вызываем обработчик вручную")
-        await handle_joint_defect(message, state)
+        await process_joint_defect(message, state)
     elif message.text == "🧴 Клей":
         logging.info("Обнаружена кнопка 'Клей', вызываем обработчик вручную")
-        await handle_glue_defect(message, state)
+        await process_glue_defect(message, state)
     else:
         logging.info(f"Неизвестная кнопка: '{message.text}'")
         await message.answer("Пожалуйста, выберите тип брака из предложенных вариантов.")
@@ -2267,45 +2247,3 @@ async def process_panel_quantity(message: Message, state: FSMContext):
 async def handle_stock(message: Message, state: FSMContext):
     # Вместо прямого вызова cmd_stock используем новую функцию из warehouse
     await warehouse_handle_stock(message, state)
-
-# Общий обработчик для кнопки "Стык"
-@router.message(F.text == "⚙️ Стык")
-async def handle_joint_button(message: Message, state: FSMContext):
-    # Получаем текущее состояние
-    current_state = await state.get_state()
-    logging.info(f"Нажата кнопка 'Стык', текущее состояние: {current_state}")
-    
-    # Проверяем, что мы в состоянии приема материалов
-    if current_state == MenuState.PRODUCTION_MATERIALS:
-        logging.info("Обработка нажатия Стык в режиме приема материалов")
-        await handle_joint_income(message, state)
-        return
-        
-    # Если мы в меню брака или нет конкретного состояния, но это нажатие кнопки после выбора Брак
-    if current_state == "ProductionStates:waiting_for_defect_type":
-        logging.info("Обработка нажатия Стык в режиме брака")
-        await handle_joint_defect(message, state)
-        return
-        
-    logging.info(f"Пропускаем обработку, так как состояние {current_state} не подходит")
-
-# Общий обработчик для кнопки "Клей"
-@router.message(F.text == "🧴 Клей")
-async def handle_glue_button(message: Message, state: FSMContext):
-    # Получаем текущее состояние
-    current_state = await state.get_state()
-    logging.info(f"Нажата кнопка 'Клей', текущее состояние: {current_state}")
-    
-    # Проверяем, что мы в состоянии приема материалов
-    if current_state == MenuState.PRODUCTION_MATERIALS:
-        logging.info("Обработка нажатия Клей в режиме приема материалов")
-        await handle_glue_income(message, state)
-        return
-        
-    # Если мы в меню брака или нет конкретного состояния, но это нажатие кнопки после выбора Брак
-    if current_state == "ProductionStates:waiting_for_defect_type":
-        logging.info("Обработка нажатия Клей в режиме брака")
-        await handle_glue_defect(message, state)
-        return
-        
-    logging.info(f"Пропускаем обработку, так как состояние {current_state} не подходит")
