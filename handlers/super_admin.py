@@ -37,7 +37,7 @@ def get_main_keyboard() -> ReplyKeyboardMarkup:
             [KeyboardButton(text="👥 Управление пользователями")],
             [KeyboardButton(text="📊 Отчеты и статистика")],
             [KeyboardButton(text="⚙️ Настройки системы")],
-            [KeyboardButton(text="💼 Роль продажника")],
+            [KeyboardButton(text="💼 Роль менеджера по продажам")],
             [KeyboardButton(text="📦 Роль складовщика")],
             [KeyboardButton(text="🏭 Роль производства")]
         ],
@@ -78,7 +78,7 @@ async def handle_reports(message: Message, state: FSMContext):
     finally:
         db.close()
 
-@router.message(F.text == "📦 Роль склада")
+@router.message(F.text == "📦 Роль складовщика")
 async def handle_warehouse_role(message: Message, state: FSMContext):
     db = next(get_db())
     try:
