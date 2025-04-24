@@ -2282,13 +2282,8 @@ async def handle_joint_button(message: Message, state: FSMContext):
         return
         
     # Если мы в меню брака или нет конкретного состояния, но это нажатие кнопки после выбора Брак
-    if current_state == "ProductionStates:waiting_for_defect_type" or current_state is None:
+    if current_state == "ProductionStates:waiting_for_defect_type":
         logging.info("Обработка нажатия Стык в режиме брака")
-        # Перед вызовом обработчика брака стыков, установим правильное состояние
-        if current_state is None:
-            logging.info("Состояние было None, устанавливаем waiting_for_defect_type")
-            await state.set_state(ProductionStates.waiting_for_defect_type)
-        
         await handle_joint_defect(message, state)
         return
         
@@ -2308,13 +2303,8 @@ async def handle_glue_button(message: Message, state: FSMContext):
         return
         
     # Если мы в меню брака или нет конкретного состояния, но это нажатие кнопки после выбора Брак
-    if current_state == "ProductionStates:waiting_for_defect_type" or current_state is None:
+    if current_state == "ProductionStates:waiting_for_defect_type":
         logging.info("Обработка нажатия Клей в режиме брака")
-        # Перед вызовом обработчика брака клея, установим правильное состояние
-        if current_state is None:
-            logging.info("Состояние было None, устанавливаем waiting_for_defect_type")
-            await state.set_state(ProductionStates.waiting_for_defect_type)
-        
         await handle_glue_defect(message, state)
         return
         
