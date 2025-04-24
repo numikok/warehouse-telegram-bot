@@ -3,7 +3,7 @@ from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKey
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from models import User, UserRole, Operation, Order, CompletedOrder, Film, Joint, Glue, ProductionOrder, OrderStatus, UserSource, Role, Panel, FinishedProduct, OperationType, JointType
+from models import User, UserRole, Operation, Order, CompletedOrder, Film, Joint, Glue, ProductionOrder, OrderStatus, Panel, FinishedProduct, OperationType, JointType
 from database import get_db
 import json
 from datetime import datetime, timedelta
@@ -170,22 +170,114 @@ async def handle_production_role(message: Message, state: FSMContext):
         db.close()
 
 @router.message(F.text == "◀️ Назад")
-async def handle_back(message: Message, state: FSMContext):
+async def handle_back(message: Message, state: FSMContext = None):
     db = next(get_db())
     try:
         user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
-        if not user:
-            await message.answer("Пожалуйста, начните с команды /start")
-            return
-        
-        next_menu, keyboard = await go_back(state, user.role)
-        await state.set_state(next_menu)
-        await message.answer(
-            "Выберите действие:",
-            reply_markup=keyboard
-        )
+        if user and user.role == UserRole.SUPER_ADMIN:
+            # Проверяем текущее состояние
+            current_state = await state.get_state() if state else None
+            
+            if current_state == SuperAdminStates.waiting_for_role.state:
+                # Возвращаемся в меню управления пользователями
+                keyboard = ReplyKeyboardMarkup(
+                    keyboard=[
+                        [KeyboardButton(text="➕ Добавить пользователя")],
+                        [KeyboardButton(text="👤 Назначить роль")],
+                        [KeyboardButton(text="📋 Список пользователей")],
+                        [KeyboardButton(text="❌ Удалить пользователя")],
+                        [KeyboardButton(text="◀️ Назад")]
+                    ],
+                    resize_keyboard=True
+                )
+                await message.answer("Выберите действие:", reply_markup=keyboard)
+            else:
+                # Возвращаемся в главное меню
+                keyboard = get_main_keyboard()
+                await message.answer("Выберите действие:", reply_markup=keyboard)
+            
+            if state:
+                await state.clear()
     finally:
         db.close()
+
+@router.message(SuperAdminStates.waiting_for_role)
+async def process_role_selection(message: Message, state: FSMContext):
+    db = next(get_db())
+    try:
+        user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
+        if user and user.role == UserRole.SUPER_ADMIN:
+            if message.text == "◀️ Назад":
+                await state.clear()
+                keyboard = ReplyKeyboardMarkup(
+                    keyboard=[
+                        [KeyboardButton(text="➕ Добавить пользователя")],
+                        [KeyboardButton(text="👤 Назначить роль")],
+                        [KeyboardButton(text="📋 Список пользователей")],
+                        [KeyboardButton(text="❌ Удалить пользователя")],
+                        [KeyboardButton(text="◀️ Назад")]
+                    ],
+                    resize_keyboard=True
+                )
+                await message.answer("Операция отменена.", reply_markup=keyboard)
+                return
+
+            # Получаем сохраненный ID пользователя
+            data = await state.get_data()
+            target_user_id = data.get("target_user_id")
+
+            # Находим выбранную роль
+            selected_role = None
+            for role in UserRole:
+                if role.value == message.text:
+                    selected_role = role
+                    break
+
+            if not selected_role:
+                await message.answer("Пожалуйста, выберите роль из списка.")
+                return
+
+            # Обновляем роль пользователя
+            target_user = db.query(User).filter(User.telegram_id == target_user_id).first()
+            if target_user:
+                target_user.role = selected_role
+                db.commit()
+                
+                # Отправляем уведомление пользователю о назначении роли
+                try:
+                    # Определяем клавиатуру в зависимости от роли
+                    user_keyboard = get_menu_keyboard(MenuState.SUPER_ADMIN_MAIN if selected_role == UserRole.SUPER_ADMIN else
+                                                     MenuState.SALES_MAIN if selected_role == UserRole.SALES_MANAGER else
+                                                     MenuState.WAREHOUSE_MAIN if selected_role == UserRole.WAREHOUSE else
+                                                     MenuState.PRODUCTION_MAIN)
+                    
+                    await message.bot.send_message(
+                        chat_id=target_user.telegram_id,
+                        text=f"Вам назначена роль: {selected_role.value}.\nТеперь вы можете использовать функции бота.",
+                        reply_markup=user_keyboard
+                    )
+                except Exception as e:
+                    logging.error(f"Не удалось отправить уведомление пользователю {target_user.telegram_id}: {str(e)}")
+
+                keyboard = ReplyKeyboardMarkup(
+                    keyboard=[
+                        [KeyboardButton(text="👤 Назначить роль")],
+                        [KeyboardButton(text="📋 Список пользователей")],
+                        [KeyboardButton(text="🔄 Сбросить роль пользователя")],
+                        [KeyboardButton(text="◀️ Назад")]
+                    ],
+                    resize_keyboard=True
+                )
+                await message.answer(
+                    f"Роль пользователя {target_user.username} успешно обновлена на {selected_role.value}",
+                    reply_markup=keyboard
+                )
+            else:
+                await message.answer("Пользователь не найден в системе.")
+
+            await state.clear()
+    finally:
+        db.close() 
 
 # Обработчики отчетов
 @router.message(F.text == "📦 Остатки материалов")
@@ -668,74 +760,3 @@ async def process_role_assignment(message: Message, state: FSMContext):
             )
     finally:
         db.close()
-
-@router.message(SuperAdminStates.waiting_for_role)
-async def process_role_selection(message: Message, state: FSMContext):
-    db = next(get_db())
-    try:
-        user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
-        if user and user.role == UserRole.SUPER_ADMIN:
-            if message.text == "◀️ Назад":
-                await state.clear()
-                await message.answer(
-                    "Операция отменена.",
-                    reply_markup=get_menu_keyboard(MenuState.SUPER_ADMIN_USERS)
-                )
-                return
-
-            # Получаем сохраненный ID пользователя
-            data = await state.get_data()
-            target_user_id = data.get("target_user_id")
-
-            # Находим выбранную роль
-            selected_role = None
-            for role in UserRole:
-                if role.value == message.text:
-                    selected_role = role
-                    break
-
-            if not selected_role:
-                await message.answer("Пожалуйста, выберите роль из списка.")
-                return
-
-            # Обновляем роль пользователя
-            target_user = db.query(User).filter(User.telegram_id == target_user_id).first()
-            if target_user:
-                target_user.role = selected_role
-                db.commit()
-                
-                # Отправляем уведомление пользователю о назначении роли
-                try:
-                    # Определяем клавиатуру в зависимости от роли
-                    user_keyboard = get_menu_keyboard(MenuState.SUPER_ADMIN_MAIN if selected_role == UserRole.SUPER_ADMIN else
-                                                     MenuState.SALES_MAIN if selected_role == UserRole.SALES_MANAGER else
-                                                     MenuState.WAREHOUSE_MAIN if selected_role == UserRole.WAREHOUSE else
-                                                     MenuState.PRODUCTION_MAIN)
-                    
-                    await message.bot.send_message(
-                        chat_id=target_user.telegram_id,
-                        text=f"Вам назначена роль: {selected_role.value}.\nТеперь вы можете использовать функции бота.",
-                        reply_markup=user_keyboard
-                    )
-                except Exception as e:
-                    logging.error(f"Не удалось отправить уведомление пользователю {target_user.telegram_id}: {str(e)}")
-
-                keyboard = ReplyKeyboardMarkup(
-                    keyboard=[
-                        [KeyboardButton(text="👤 Назначить роль")],
-                        [KeyboardButton(text="📋 Список пользователей")],
-                        [KeyboardButton(text="🔄 Сбросить роль пользователя")],
-                        [KeyboardButton(text="◀️ Назад")]
-                    ],
-                    resize_keyboard=True
-                )
-                await message.answer(
-                    f"Роль пользователя {target_user.username} успешно обновлена на {selected_role.value}",
-                    reply_markup=keyboard
-                )
-            else:
-                await message.answer("Пользователь не найден в системе.")
-
-            await state.clear()
-    finally:
-        db.close() 
