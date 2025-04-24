@@ -677,23 +677,68 @@ async def process_joint_type(message: Message, state: FSMContext):
         "Замыкающий": JointType.CLOSING
     }
     
-    if message.text not in ["Бабочка", "Простой", "Замыкающий"]:
+    selected_type_enum = joint_type_mapping.get(message.text)
+
+    if not selected_type_enum:
         await message.answer("Пожалуйста, выберите тип стыка из предложенных вариантов.")
         return
         
-    await state.update_data(joint_type=joint_type_mapping[message.text])
-    await message.answer(
-        "Введите цвет стыка:",
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="◀️ Назад")]],
-            resize_keyboard=True
+    await state.update_data(joint_type=selected_type_enum)
+
+    # Получаем существующие цвета для данного типа
+    db = next(get_db())
+    try:
+        existing_colors = db.query(Joint.color).filter(
+            Joint.type == selected_type_enum
+        ).distinct().all()
+        existing_colors = sorted([c[0] for c in existing_colors]) # Сортируем для порядка
+
+        # Создаем кнопки для цветов
+        keyboard_buttons = []
+        row = []
+        if existing_colors:
+            for color in existing_colors:
+                row.append(KeyboardButton(text=color))
+                if len(row) == 2:
+                    keyboard_buttons.append(row)
+                    row = []
+            if row:
+                keyboard_buttons.append(row)
+
+        # Добавляем кнопку Назад
+        keyboard_buttons.append([KeyboardButton(text="◀️ Назад")])
+        
+        keyboard = ReplyKeyboardMarkup(
+            keyboard=keyboard_buttons,
+            resize_keyboard=True,
+            input_field_placeholder="Выберите цвет или введите новый"
         )
-    )
+
+        if existing_colors:
+            colors_text = "\n".join([f"- {c}" for c in existing_colors])
+            await message.answer(
+                f"Выберите цвет стыка для типа '{message.text}' или введите новый:\n\nСуществующие цвета:\n{colors_text}",
+                reply_markup=keyboard
+            )
+        else:
+             await message.answer(
+                f"Введите цвет нового стыка (тип: '{message.text}'):",
+                 reply_markup=ReplyKeyboardMarkup(
+                    keyboard=[[KeyboardButton(text="◀️ Назад")]],
+                    resize_keyboard=True,
+                    input_field_placeholder="Введите новый цвет"
+                )
+            )
+
+    finally:
+        db.close()
+        
     await state.set_state(ProductionStates.waiting_for_joint_color)
 
 @router.message(ProductionStates.waiting_for_joint_color)
 async def process_joint_color(message: Message, state: FSMContext):
     if message.text == "◀️ Назад":
+        # Возвращаемся к выбору типа
         await message.answer(
             "Выберите тип стыка:",
             reply_markup=get_joint_type_keyboard()
@@ -701,28 +746,82 @@ async def process_joint_color(message: Message, state: FSMContext):
         await state.set_state(ProductionStates.waiting_for_joint_type)
         return
     
-    await state.update_data(joint_color=message.text)
+    selected_color = message.text.strip()
+    if not selected_color:
+        await message.answer("Цвет стыка не может быть пустым. Попробуйте снова.")
+        return
+        
+    await state.update_data(joint_color=selected_color)
+    
+    # Толщину всегда выбираем из стандартных кнопок
     await message.answer(
-        "Выберите толщину стыка:",
-        reply_markup=get_joint_thickness_keyboard()
+        f"Выберите толщину стыка (цвет: {selected_color}):",
+        reply_markup=get_joint_thickness_keyboard() # Используем стандартную клавиатуру толщин
     )
     await state.set_state(ProductionStates.waiting_for_joint_thickness)
 
 @router.message(ProductionStates.waiting_for_joint_thickness)
 async def process_joint_thickness(message: Message, state: FSMContext):
     if message.text == "◀️ Назад":
-        await message.answer(
-            "Введите цвет стыка:",
-            reply_markup=ReplyKeyboardMarkup(
-                keyboard=[[KeyboardButton(text="◀️ Назад")]],
-                resize_keyboard=True
+        # Возвращаемся к выбору/вводу цвета
+        data = await state.get_data()
+        selected_type_enum = data.get('joint_type')
+        type_display_names = {
+            JointType.BUTTERFLY: "Бабочка",
+            JointType.SIMPLE: "Простой",
+            JointType.CLOSING: "Замыкающий"
+        }
+        type_name = type_display_names.get(selected_type_enum, "Unknown")
+        
+        # Пересоздаем клавиатуру для цветов
+        db = next(get_db())
+        try:
+            existing_colors = db.query(Joint.color).filter(
+                Joint.type == selected_type_enum
+            ).distinct().all()
+            existing_colors = sorted([c[0] for c in existing_colors])
+
+            keyboard_buttons = []
+            row = []
+            if existing_colors:
+                for color in existing_colors:
+                    row.append(KeyboardButton(text=color))
+                    if len(row) == 2:
+                        keyboard_buttons.append(row)
+                        row = []
+                if row:
+                    keyboard_buttons.append(row)
+            keyboard_buttons.append([KeyboardButton(text="◀️ Назад")])
+            
+            keyboard = ReplyKeyboardMarkup(
+                keyboard=keyboard_buttons,
+                resize_keyboard=True,
+                input_field_placeholder="Выберите цвет или введите новый"
             )
-        )
+            
+            if existing_colors:
+                colors_text = "\n".join([f"- {c}" for c in existing_colors])
+                await message.answer(
+                    f"Выберите цвет стыка для типа '{type_name}' или введите новый:\n\nСуществующие цвета:\n{colors_text}",
+                    reply_markup=keyboard
+                )
+            else:
+                await message.answer(
+                    f"Введите цвет нового стыка (тип: '{type_name}'):",
+                    reply_markup=ReplyKeyboardMarkup(
+                        keyboard=[[KeyboardButton(text="◀️ Назад")]],
+                        resize_keyboard=True,
+                        input_field_placeholder="Введите новый цвет"
+                    )
+                )
+        finally:
+            db.close()
+
         await state.set_state(ProductionStates.waiting_for_joint_color)
         return
     
     if message.text not in ["0.5", "0.8"]:
-        await message.answer("Пожалуйста, выберите толщину из предложенных вариантов.")
+        await message.answer("Пожалуйста, выберите толщину из предложенных вариантов (0.5 или 0.8).")
         return
     
     await state.update_data(joint_thickness=float(message.text))
@@ -744,9 +843,9 @@ async def process_joint_quantity(message: Message, state: FSMContext):
         )
         await state.set_state(ProductionStates.waiting_for_joint_thickness)
         return
-
+    
     try:
-        quantity = int(message.text)
+        quantity = int(message.text.strip())
         if quantity <= 0:
             await message.answer("Количество должно быть положительным числом.")
             return
@@ -1275,44 +1374,62 @@ async def handle_film(message: Message, state: FSMContext):
     if not await check_production_access(message):
         return
     
-    # Проверяем, что мы находимся в состоянии добавления материалов
     current_state = await state.get_state()
     logging.info(f"Нажата кнопка 'Пленка', текущее состояние: {current_state}")
     
-    # Если мы в меню выбора типа брака, направляем запрос в обработчик брака
     if current_state == "ProductionStates:waiting_for_defect_type":
         logging.info("Перенаправляем в handle_film_defect, так как находимся в меню брака.")
         await handle_film_defect(message, state)
         return
     
-    # Если мы не в меню материалов, пропускаем обработку
     if current_state != MenuState.PRODUCTION_MATERIALS:
         logging.info(f"Пропускаем обработку, так как не в режиме добавления материалов")
         return
         
-    # Запрашиваем код пленки
-    keyboard = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="◀️ Назад")]],
-        resize_keyboard=True
-    )
-    
-    # Получаем список существующих пленок
     db = next(get_db())
     try:
-        films = db.query(Film).all()
+        films = db.query(Film).order_by(Film.code).all()
+        
+        keyboard_buttons = []
+        row = []
+        films_text_list = []
+        
         if films:
-            films_list = [f"- {film.code} (остаток: {film.total_remaining} м)" for film in films]
-            films_text = "\n".join(films_list)
-            
+            for film in films:
+                button_text = film.code
+                row.append(KeyboardButton(text=button_text))
+                films_text_list.append(f"- {film.code} (остаток: {film.total_remaining} м)")
+                if len(row) == 2:
+                    keyboard_buttons.append(row)
+                    row = []
+            if row:
+                keyboard_buttons.append(row)
+        
+        # Добавляем кнопку Назад
+        keyboard_buttons.append([KeyboardButton(text="◀️ Назад")])
+        
+        keyboard = ReplyKeyboardMarkup(
+            keyboard=keyboard_buttons,
+            resize_keyboard=True,
+            input_field_placeholder="Выберите код или введите новый"
+        )
+        
+        if films:
+            films_text = "\n".join(films_text_list)
             await message.answer(
-                f"Введите код пленки для добавления.\n\nТекущие коды в системе:\n{films_text}",
+                f"Выберите код пленки для добавления или введите новый:\n\nТекущие коды в системе:\n{films_text}",
                 reply_markup=keyboard
             )
         else:
             await message.answer(
                 "Введите код новой пленки для добавления:",
-                reply_markup=keyboard
+                reply_markup=ReplyKeyboardMarkup(
+                    keyboard=[[KeyboardButton(text="◀️ Назад")]],
+                    resize_keyboard=True,
+                    input_field_placeholder="Введите код новой пленки"
+                )
             )
+            
     finally:
         db.close()
         
@@ -1327,29 +1444,28 @@ async def process_film_code(message: Message, state: FSMContext):
         return
     
     film_code = message.text.strip()
-    
+    if not film_code:
+        await message.answer("Код пленки не может быть пустым. Попробуйте снова.")
+        return
+
     db = next(get_db())
     try:
-        # Проверяем существование пленки
         film = db.query(Film).filter(Film.code == film_code).first()
         
-        # Если пленки с таким кодом нет, создаем новую запись
         if not film:
-            # Создаем новую запись пленки с указанным кодом и нулевым остатком
-            # НЕ указываем значения по умолчанию - они будут заданы пользователем
+            # Создаем новую запись пленки, если код не найден
             film = Film(
                 code=film_code,
-                total_remaining=0.0     # Только нулевой остаток для начала
+                total_remaining=0.0, # Начальный остаток 0
+                # panel_consumption, meters_per_roll, thickness будут запрошены позже
             )
             db.add(film)
             db.commit()
-            
-            # Уведомляем, что добавлен новый цвет
-            await message.answer(
-                f"👍 Добавлен новый цвет пленки: {film_code}"
-            )
-        
-        # Сохраняем код пленки
+            logging.info(f"Добавлен новый цвет пленки: {film_code}")
+            await message.answer(f"👍 Добавлен новый цвет пленки: {film_code}")
+        else:
+            logging.info(f"Выбран существующий код пленки: {film_code}")
+
         await state.update_data(film_code=film_code)
         
         # Запрашиваем количество рулонов
@@ -1373,31 +1489,47 @@ async def handle_film_defect(message: Message, state: FSMContext):
     
     db = next(get_db())
     try:
-        # Получаем список всех цветов пленки
-        films = db.query(Film).all()
-        films_list = [f"- {film.code} (остаток: {film.total_remaining} м)" for film in films]
-        logging.info(f"Доступные пленки: {films_list}")
+        # Получаем список всех пленок, у которых есть остаток
+        films = db.query(Film).filter(Film.total_remaining > 0).all()
+        logging.info(f"Доступные пленки для брака: {[f.code for f in films]}")
         
         await state.update_data(defect_type="film")
         await state.set_state(ProductionStates.waiting_for_defect_film_color)
         
-        # Запрашиваем цвет пленки
+        # Если нет пленок в системе с остатком, сообщаем об этом
+        if not films:
+            await message.answer(
+                "В системе нет ни одной пленки с положительным остатком. Сначала добавьте пленку через меню 'Приход сырья'.",
+                reply_markup=get_menu_keyboard(MenuState.PRODUCTION_DEFECT) # Возврат в меню брака
+            )
+            return
+
+        # Формируем кнопки
+        keyboard_buttons = []
+        row = []
+        films_text_list = [] # Список для текстового описания
+        for film in films:
+            button_text = film.code
+            row.append(KeyboardButton(text=button_text))
+            films_text_list.append(f"- {film.code} (остаток: {film.total_remaining} м)")
+            # Группируем по 2 кнопки в ряду
+            if len(row) == 2:
+                keyboard_buttons.append(row)
+                row = []
+        if row: # Добавляем последний неполный ряд, если он есть
+            keyboard_buttons.append(row)
+
+        # Добавляем кнопку "Назад"
+        keyboard_buttons.append([KeyboardButton(text="◀️ Назад")])
+
         keyboard = ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="◀️ Назад")]],
+            keyboard=keyboard_buttons,
             resize_keyboard=True
         )
         
-        # Если нет пленок в системе, сообщаем что нельзя добавить брак
-        if not films:
-            await message.answer(
-                "В системе нет ни одной пленки. Сначала добавьте пленку через меню 'Приход сырья'.",
-                reply_markup=keyboard
-            )
-            return
-        
-        films_text = "\n".join(films_list)
+        films_text = "\\n".join(films_text_list)
         await message.answer(
-            f"Выберите цвет/код бракованной пленки из списка:\n\nДоступные варианты:\n{films_text}",
+            f"Выберите код бракованной пленки:\\n\\nДоступные варианты:\\n{films_text}",
             reply_markup=keyboard
         )
     finally:
@@ -1485,15 +1617,49 @@ async def handle_panel(message: Message, state: FSMContext):
 async def handle_joint_defect(message: Message, state: FSMContext):
     logging.info("Специальный обработчик для брака стыков вызван")
     
-    # Запрашиваем тип бракованных стыков
-    await state.update_data(defect_type="joint_defect")
-    await state.set_state(ProductionStates.waiting_for_defect_joint_type)
-    
-    await message.answer(
-        "Выберите тип бракованных стыков:",
-        reply_markup=get_joint_type_keyboard()
-    )
-    logging.info("Установлено состояние: waiting_for_defect_joint_type")
+    db = next(get_db())
+    try:
+        # Получаем типы стыков, которые есть в наличии
+        existing_types = db.query(Joint.type).filter(Joint.quantity > 0).distinct().all()
+        existing_types = [t[0] for t in existing_types] # Распаковываем кортежи
+        
+        if not existing_types:
+            await message.answer(
+                "В базе нет ни одного типа стыков с положительным остатком.",
+                reply_markup=get_menu_keyboard(MenuState.PRODUCTION_DEFECT)
+            )
+            return
+        
+        # Маппинг enum на русские названия
+        type_display_names = {
+            JointType.BUTTERFLY: "Бабочка",
+            JointType.SIMPLE: "Простой",
+            JointType.CLOSING: "Замыкающий"
+        }
+        
+        # Создаем кнопки только для существующих типов
+        keyboard_buttons = []
+        for joint_type in existing_types:
+            display_name = type_display_names.get(joint_type, str(joint_type))
+            keyboard_buttons.append([KeyboardButton(text=display_name)])
+        
+        keyboard_buttons.append([KeyboardButton(text="◀️ Назад")])
+        
+        keyboard = ReplyKeyboardMarkup(
+            keyboard=keyboard_buttons,
+            resize_keyboard=True
+        )
+        
+        await state.update_data(defect_type="joint_defect")
+        await state.set_state(ProductionStates.waiting_for_defect_joint_type)
+        
+        await message.answer(
+            "Выберите тип бракованных стыков:",
+            reply_markup=keyboard
+        )
+        logging.info("Установлено состояние: waiting_for_defect_joint_type")
+    finally:
+        db.close()
 
 @router.message(ProductionStates.waiting_for_defect_type, F.text == "🧴 Клей")
 async def handle_glue_defect(message: Message, state: FSMContext):
@@ -1583,88 +1749,226 @@ async def process_defect_glue_quantity(message: Message, state: FSMContext):
     
     await state.clear()
 
-# Обработчик для типа бракованных стыков
 @router.message(ProductionStates.waiting_for_defect_joint_type)
 async def process_defect_joint_type(message: Message, state: FSMContext):
-    # Маппинг русских названий на значения enum
-    joint_type_mapping = {
+    if message.text == "◀️ Назад":
+        await handle_defect(message, state) # Возврат в меню выбора типа брака
+        return
+    
+    # Маппинг русских названий обратно на enum
+    type_reverse_mapping = {
         "Бабочка": JointType.BUTTERFLY,
         "Простой": JointType.SIMPLE,
         "Замыкающий": JointType.CLOSING
     }
     
-    if message.text == "◀️ Назад":
-        await handle_defect(message, state)
+    selected_type_enum = type_reverse_mapping.get(message.text)
+    
+    if not selected_type_enum:
+        await message.answer("Пожалуйста, выберите тип стыка из предложенных кнопок.")
+        # Можно переотправить клавиатуру с типами, если нужно
+        # await handle_joint_defect(message, state)
         return
+        
+    await state.update_data(defect_joint_type=selected_type_enum)
     
-    if message.text not in ["Бабочка", "Простой", "Замыкающий"]:
-        await message.answer("Пожалуйста, выберите тип стыка из предложенных вариантов.")
-        return
-    
-    # Сохраняем тип стыка
-    await state.update_data(defect_joint_type=joint_type_mapping[message.text])
-    
-    # Запрашиваем цвет стыка
-    await message.answer(
-        "Введите цвет бракованных стыков:",
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="◀️ Назад")]],
+    # Получаем доступные цвета для выбранного типа
+    db = next(get_db())
+    try:
+        existing_colors = db.query(Joint.color).filter(
+            Joint.type == selected_type_enum,
+            Joint.quantity > 0
+        ).distinct().all()
+        existing_colors = [c[0] for c in existing_colors]
+        
+        if not existing_colors:
+            await message.answer(
+                f"Для типа стыка '{message.text}' нет доступных цветов с положительным остатком.",
+                reply_markup=get_menu_keyboard(MenuState.PRODUCTION_DEFECT)
+            )
+            await state.clear() # Сбрасываем состояние, т.к. дальше идти некуда
+            return
+
+        # Создаем кнопки для цветов
+        keyboard_buttons = []
+        row = []
+        for color in existing_colors:
+            row.append(KeyboardButton(text=color))
+            if len(row) == 2:
+                keyboard_buttons.append(row)
+                row = []
+        if row:
+            keyboard_buttons.append(row)
+            
+        keyboard_buttons.append([KeyboardButton(text="◀️ Назад")])
+        
+        keyboard = ReplyKeyboardMarkup(
+            keyboard=keyboard_buttons,
             resize_keyboard=True
         )
-    )
-    await state.set_state(ProductionStates.waiting_for_defect_joint_color)
+        
+        await message.answer(
+            f"Выберите цвет бракованных стыков типа '{message.text}':",
+            reply_markup=keyboard
+        )
+        await state.set_state(ProductionStates.waiting_for_defect_joint_color)
+        
+    finally:
+        db.close()
 
 # Обработчик для цвета бракованных стыков
 @router.message(ProductionStates.waiting_for_defect_joint_color)
 async def process_defect_joint_color(message: Message, state: FSMContext):
     if message.text == "◀️ Назад":
-        await message.answer(
-            "Выберите тип бракованных стыков:",
-            reply_markup=get_joint_type_keyboard()
-        )
-        await state.set_state(ProductionStates.waiting_for_defect_joint_type)
+        # Возвращаемся к выбору типа стыка
+        await handle_joint_defect(message, state) 
         return
     
-    # Сохраняем цвет стыка
-    await state.update_data(defect_joint_color=message.text)
+    selected_color = message.text
+    data = await state.get_data()
+    selected_type = data.get('defect_joint_type')
     
-    # Запрашиваем толщину стыка
-    await message.answer(
-        "Выберите толщину бракованных стыков:",
-        reply_markup=get_joint_thickness_keyboard()
-    )
-    await state.set_state(ProductionStates.waiting_for_defect_joint_thickness)
+    if not selected_type:
+        await message.answer("Произошла ошибка, не найден тип стыка. Попробуйте снова.")
+        await handle_defect(message, state)
+        return
+        
+    # Проверяем, что такой цвет существует для данного типа
+    db = next(get_db())
+    try:
+        # Получаем доступные толщины для выбранного типа и цвета
+        existing_thicknesses = db.query(Joint.thickness).filter(
+            Joint.type == selected_type,
+            Joint.color == selected_color,
+            Joint.quantity > 0
+        ).distinct().all()
+        existing_thicknesses = [str(t[0]) for t in existing_thicknesses]
+        
+        if not existing_thicknesses:
+            await message.answer(
+                f"Для стыка типа '{selected_type.name}' цвета '{selected_color}' нет доступных толщин с положительным остатком.",
+                reply_markup=get_menu_keyboard(MenuState.PRODUCTION_DEFECT)
+            )
+            await state.clear()
+            return
+        
+        await state.update_data(defect_joint_color=selected_color)
+        
+        # Создаем кнопки для толщины
+        keyboard_buttons = []
+        if "0.5" in existing_thicknesses:
+            keyboard_buttons.append([KeyboardButton(text="0.5")])
+        if "0.8" in existing_thicknesses:
+             keyboard_buttons.append([KeyboardButton(text="0.8")])
+
+        keyboard_buttons.append([KeyboardButton(text="◀️ Назад")])
+
+        keyboard = ReplyKeyboardMarkup(
+            keyboard=keyboard_buttons,
+            resize_keyboard=True
+        )
+
+        await message.answer(
+            f"Выберите толщину бракованных стыков (цвет: {selected_color}):",
+            reply_markup=keyboard
+        )
+        await state.set_state(ProductionStates.waiting_for_defect_joint_thickness)
+        
+    finally:
+        db.close()
 
 # Обработчик для толщины бракованных стыков
 @router.message(ProductionStates.waiting_for_defect_joint_thickness)
 async def process_defect_joint_thickness(message: Message, state: FSMContext):
     if message.text == "◀️ Назад":
+        # Возвращаемся к выбору цвета
+        data = await state.get_data()
+        selected_type_enum = data.get('defect_joint_type')
+        
+        # Переотправляем клавиатуру с цветами для выбранного типа
+        db = next(get_db())
+        try:
+            existing_colors = db.query(Joint.color).filter(
+                Joint.type == selected_type_enum,
+                Joint.quantity > 0
+            ).distinct().all()
+            existing_colors = [c[0] for c in existing_colors]
+
+            keyboard_buttons = []
+            row = []
+            for color in existing_colors:
+                row.append(KeyboardButton(text=color))
+                if len(row) == 2:
+                    keyboard_buttons.append(row)
+                    row = []
+            if row:
+                keyboard_buttons.append(row)
+            keyboard_buttons.append([KeyboardButton(text="◀️ Назад")])
+            
+            keyboard = ReplyKeyboardMarkup(
+                keyboard=keyboard_buttons,
+                resize_keyboard=True
+            )
+            
+            # Получаем русское название типа
+            type_display_names = {
+                JointType.BUTTERFLY: "Бабочка",
+                JointType.SIMPLE: "Простой",
+                JointType.CLOSING: "Замыкающий"
+            }
+            type_name = type_display_names.get(selected_type_enum, str(selected_type_enum))
+
+            await message.answer(
+                f"Выберите цвет бракованных стыков типа '{type_name}':",
+                reply_markup=keyboard
+            )
+        finally:
+            db.close()
+            
+        await state.set_state(ProductionStates.waiting_for_defect_joint_color)
+        return
+    
+    if message.text not in ["0.5", "0.8"]:
+        await message.answer("Пожалуйста, выберите толщину из предложенных кнопок (0.5 или 0.8).")
+        return
+    
+    selected_thickness = float(message.text)
+    
+    # Проверяем, существует ли стык с такими параметрами и положительным остатком
+    data = await state.get_data()
+    selected_type = data.get('defect_joint_type')
+    selected_color = data.get('defect_joint_color')
+    
+    db = next(get_db())
+    try:
+        joint = db.query(Joint).filter(
+            Joint.type == selected_type,
+            Joint.color == selected_color,
+            Joint.thickness == selected_thickness,
+            Joint.quantity > 0
+        ).first()
+        
+        if not joint:
+             await message.answer(
+                f"Стык с параметрами (Тип: {selected_type.name}, Цвет: {selected_color}, Толщина: {selected_thickness}) не найден или его остаток равен 0.",
+                reply_markup=get_menu_keyboard(MenuState.PRODUCTION_DEFECT)
+            )
+             await state.clear()
+             return
+
+        await state.update_data(defect_joint_thickness=selected_thickness)
+        
+        # Запрашиваем количество
         await message.answer(
-            "Введите цвет бракованных стыков:",
+            f"Введите количество бракованных стыков (доступно: {joint.quantity} шт.):",
             reply_markup=ReplyKeyboardMarkup(
                 keyboard=[[KeyboardButton(text="◀️ Назад")]],
                 resize_keyboard=True
             )
         )
-        await state.set_state(ProductionStates.waiting_for_defect_joint_color)
-        return
-    
-    if message.text not in ["0.5", "0.8"]:
-        await message.answer("Пожалуйста, выберите толщину из предложенных вариантов.")
-        return
-    
-    # Сохраняем толщину стыка
-    await state.update_data(defect_joint_thickness=float(message.text))
-    
-    # Запрашиваем количество стыков
-    await message.answer(
-        "Введите количество бракованных стыков:",
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="◀️ Назад")]],
-            resize_keyboard=True
-        )
-    )
-    await state.set_state(ProductionStates.waiting_for_defect_joint_quantity)
+        await state.set_state(ProductionStates.waiting_for_defect_joint_quantity)
+    finally:
+        db.close()
 
 # Обработчик для количества бракованных стыков
 @router.message(ProductionStates.waiting_for_defect_joint_quantity)
