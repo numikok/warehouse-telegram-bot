@@ -1527,9 +1527,9 @@ async def handle_film_defect(message: Message, state: FSMContext):
             resize_keyboard=True
         )
         
-        films_text = "\\n".join(films_text_list)
+        films_text = "\n".join(films_text_list)
         await message.answer(
-            f"Выберите код бракованной пленки:\\n\\nДоступные варианты:\\n{films_text}",
+            f"Выберите код бракованной пленки:\n\nДоступные варианты:\n{films_text}",
             reply_markup=keyboard
         )
     finally:
