@@ -2267,3 +2267,55 @@ async def process_panel_quantity(message: Message, state: FSMContext):
 async def handle_stock(message: Message, state: FSMContext):
     # Вместо прямого вызова cmd_stock используем новую функцию из warehouse
     await warehouse_handle_stock(message, state)
+
+# Общий обработчик для кнопки "Стык"
+@router.message(F.text == "⚙️ Стык")
+async def handle_joint_button(message: Message, state: FSMContext):
+    # Получаем текущее состояние
+    current_state = await state.get_state()
+    logging.info(f"Нажата кнопка 'Стык', текущее состояние: {current_state}")
+    
+    # Проверяем, что мы в состоянии приема материалов
+    if current_state == MenuState.PRODUCTION_MATERIALS:
+        logging.info("Обработка нажатия Стык в режиме приема материалов")
+        await handle_joint_income(message, state)
+        return
+        
+    # Если мы в меню брака или нет конкретного состояния, но это нажатие кнопки после выбора Брак
+    if current_state == "ProductionStates:waiting_for_defect_type" or current_state is None:
+        logging.info("Обработка нажатия Стык в режиме брака")
+        # Перед вызовом обработчика брака стыков, установим правильное состояние
+        if current_state is None:
+            logging.info("Состояние было None, устанавливаем waiting_for_defect_type")
+            await state.set_state(ProductionStates.waiting_for_defect_type)
+        
+        await handle_joint_defect(message, state)
+        return
+        
+    logging.info(f"Пропускаем обработку, так как состояние {current_state} не подходит")
+
+# Общий обработчик для кнопки "Клей"
+@router.message(F.text == "🧴 Клей")
+async def handle_glue_button(message: Message, state: FSMContext):
+    # Получаем текущее состояние
+    current_state = await state.get_state()
+    logging.info(f"Нажата кнопка 'Клей', текущее состояние: {current_state}")
+    
+    # Проверяем, что мы в состоянии приема материалов
+    if current_state == MenuState.PRODUCTION_MATERIALS:
+        logging.info("Обработка нажатия Клей в режиме приема материалов")
+        await handle_glue_income(message, state)
+        return
+        
+    # Если мы в меню брака или нет конкретного состояния, но это нажатие кнопки после выбора Брак
+    if current_state == "ProductionStates:waiting_for_defect_type" or current_state is None:
+        logging.info("Обработка нажатия Клей в режиме брака")
+        # Перед вызовом обработчика брака клея, установим правильное состояние
+        if current_state is None:
+            logging.info("Состояние было None, устанавливаем waiting_for_defect_type")
+            await state.set_state(ProductionStates.waiting_for_defect_type)
+        
+        await handle_glue_defect(message, state)
+        return
+        
+    logging.info(f"Пропускаем обработку, так как состояние {current_state} не подходит")
