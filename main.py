@@ -317,7 +317,7 @@ async def button_order(message: Message, state: FSMContext):
 
 @dp.message(F.text == "📦 Количество готовой продукции")
 async def button_stock(message: Message, state: FSMContext):
-    await warehouse.handle_finished_products(message, state)
+    await sales.handle_stock(message, state)
 
 @dp.message(F.text == "👥 Пользователи")
 async def button_users(message: Message, state: FSMContext):
