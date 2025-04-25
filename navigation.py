@@ -38,6 +38,7 @@ class MenuState(str, Enum):
     SUPER_ADMIN_WAREHOUSE = "super_admin_warehouse"
     SUPER_ADMIN_PRODUCTION = "super_admin_production"
     SUPER_ADMIN_SALES = "super_admin_sales"
+    SUPER_ADMIN_CHINA_ORDER = "super_admin_china_order"
     
     # Инвентарь - новые состояния для всех ролей
     INVENTORY_CATEGORIES = "inventory_categories"
@@ -86,6 +87,7 @@ MENU_NAVIGATION = {
     MenuState.SUPER_ADMIN_WAREHOUSE: MenuState.SUPER_ADMIN_MAIN,
     MenuState.SUPER_ADMIN_PRODUCTION: MenuState.SUPER_ADMIN_MAIN,
     MenuState.SUPER_ADMIN_SALES: MenuState.SUPER_ADMIN_MAIN,
+    MenuState.SUPER_ADMIN_CHINA_ORDER: MenuState.SUPER_ADMIN_MAIN,
 }
 
 # Маппинг ролей на их главные меню
@@ -237,7 +239,8 @@ def get_menu_keyboard(menu_state: MenuState, is_admin_context: bool = False) -> 
             [KeyboardButton(text="⚙️ Настройки системы")],
             [KeyboardButton(text="💼 Роль менеджера по продажам")],
             [KeyboardButton(text="📦 Роль склада")],
-            [KeyboardButton(text="🏭 Роль производства")]
+            [KeyboardButton(text="🏭 Роль производства")],
+            [KeyboardButton(text="��🇳 Заказ в Китай")]
         ],
         
         # Подменю супер-админа
@@ -279,6 +282,11 @@ def get_menu_keyboard(menu_state: MenuState, is_admin_context: bool = False) -> 
             [KeyboardButton(text="📝 Заказать")],
             [KeyboardButton(text="📋 Мои заказы")],
             [KeyboardButton(text="📊 Статистика")],
+            [KeyboardButton(text="◀️ Назад")]
+        ],
+        
+        # Новое меню для Заказа в Китай
+        MenuState.SUPER_ADMIN_CHINA_ORDER: [
             [KeyboardButton(text="◀️ Назад")]
         ],
     }

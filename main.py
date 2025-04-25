@@ -430,6 +430,11 @@ async def button_warehouse_role(message: Message, state: FSMContext):
 async def button_sales_role(message: Message, state: FSMContext):
     await super_admin.handle_sales_role(message, state)
 
+@dp.message(F.text == "🇨🇳 Заказ в Китай")
+async def button_china_order(message: Message, state: FSMContext):
+    await state.set_state(MenuState.SUPER_ADMIN_CHINA_ORDER)
+    await super_admin.handle_china_order_check(message, state)
+
 @dp.message(F.text == "◀️ Назад")
 async def button_back(message: Message, state: FSMContext):
     """Универсальный обработчик кнопки Назад"""

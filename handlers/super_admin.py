@@ -11,6 +11,10 @@ from navigation import MenuState, get_menu_keyboard, go_back
 import logging
 import re
 from handlers.warehouse import handle_stock
+from sqlalchemy import func
+from sqlalchemy.orm import joinedload
+import pandas as pd
+import io
 
 router = Router()
 
@@ -169,35 +173,80 @@ async def handle_production_role(message: Message, state: FSMContext):
     finally:
         db.close()
 
+@router.message(F.text == "🇨🇳 Заказ в Китай")
+async def handle_china_order_check(message: Message, state: FSMContext):
+    """Проверяет остатки и формирует список для заказа в Китай"""
+    if not await check_super_admin_access(message):
+        return
+    
+    await state.set_state(MenuState.SUPER_ADMIN_CHINA_ORDER)
+    db = next(get_db())
+    shortages = []
+    
+    try:
+        # Проверка пленки
+        low_films = db.query(Film).filter(Film.total_remaining < 30).all()
+        for film in low_films:
+            shortages.append(f"- {film.code} пленка (осталось {film.total_remaining:.0f} метров)")
+            
+        # Проверка панелей
+        low_panels = db.query(Panel).filter(Panel.quantity < 150).all()
+        for panel in low_panels:
+            shortages.append(f"- Панели {panel.thickness} мм (осталось {panel.quantity} штук)")
+            
+        # Проверка стыков
+        low_joints = db.query(Joint).filter(Joint.quantity < 100).all()
+        for joint in low_joints:
+             # Убираем '_thickness' из названия типа стыка, если оно там есть
+            joint_type_name = joint.type.name.replace('_thickness', '').capitalize()
+            shortages.append(f"- Стык {joint_type_name} {joint.color} {joint.thickness} мм (осталось {joint.quantity} штук)")
+            
+        # Проверка клея
+        glue = db.query(Glue).filter(Glue.quantity < 100).first()
+        if glue:
+            shortages.append(f"- Клей (осталось {glue.quantity} штук)")
+            
+        if not shortages:
+            response = "✅ Всех материалов достаточно. Заказ в Китай не требуется."
+        else:
+            response = "🇨🇳 Недостающие материалы для заказа в Китай:\n\n"
+            response += "\n".join(shortages)
+            
+        await message.answer(response, reply_markup=get_menu_keyboard(MenuState.SUPER_ADMIN_CHINA_ORDER))
+            
+    except Exception as e:
+        logging.error(f"Ошибка при проверке заказа в Китай: {e}", exc_info=True)
+        await message.answer("Произошла ошибка при проверке остатков.")
+    finally:
+        db.close()
+
 @router.message(F.text == "◀️ Назад")
-async def handle_back(message: Message, state: FSMContext = None):
+async def handle_back(message: Message, state: FSMContext):
+    """Обработчик кнопки Назад для супер-админа"""
+    current_state = await state.get_state()
+    logging.info(f"Super admin back button pressed. Current state: {current_state}")
+    
+    # Если мы находимся в контексте другой роли (is_admin_context=True)
+    data = await state.get_data()
+    if data.get("is_admin_context"): 
+        logging.info("Returning from role emulation to super admin main menu.")
+        await state.update_data(is_admin_context=False) # Сбрасываем флаг
+        await state.set_state(MenuState.SUPER_ADMIN_MAIN)
+        await message.answer("Возврат в главное меню супер-администратора.", reply_markup=get_menu_keyboard(MenuState.SUPER_ADMIN_MAIN))
+        return
+
+    # Стандартная логика go_back для меню супер-админа
     db = next(get_db())
     try:
         user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
-        if user and user.role == UserRole.SUPER_ADMIN:
-            # Проверяем текущее состояние
-            current_state = await state.get_state() if state else None
+        if not user or user.role != UserRole.SUPER_ADMIN:
+            await message.answer("Ошибка доступа.")
+            return
             
-            if current_state == SuperAdminStates.waiting_for_role.state:
-                # Возвращаемся в меню управления пользователями
-                keyboard = ReplyKeyboardMarkup(
-                    keyboard=[
-                        [KeyboardButton(text="➕ Добавить пользователя")],
-                        [KeyboardButton(text="👤 Назначить роль")],
-                        [KeyboardButton(text="📋 Список пользователей")],
-                        [KeyboardButton(text="❌ Удалить пользователя")],
-                        [KeyboardButton(text="◀️ Назад")]
-                    ],
-                    resize_keyboard=True
-                )
-                await message.answer("Выберите действие:", reply_markup=keyboard)
-            else:
-                # Возвращаемся в главное меню
-                keyboard = get_main_keyboard()
-                await message.answer("Выберите действие:", reply_markup=keyboard)
-            
-            if state:
-                await state.clear()
+        next_menu, keyboard = await go_back(state, UserRole.SUPER_ADMIN)
+        await state.set_state(next_menu)
+        await message.answer("Возврат в предыдущее меню.", reply_markup=keyboard)
+        logging.info(f"Navigated back to menu: {next_menu}")
     finally:
         db.close()
 
@@ -795,5 +844,16 @@ async def process_role_assignment(message: Message, state: FSMContext):
                 f"Выберите роль для пользователя {target_user.username}:",
                 reply_markup=keyboard
             )
+    finally:
+        db.close()
+
+async def check_super_admin_access(message: Message) -> bool:
+    db = next(get_db())
+    try:
+        user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
+        if not user or user.role != UserRole.SUPER_ADMIN:
+            await message.answer("У вас нет прав для выполнения этой команды.")
+            return False
+        return True
     finally:
         db.close()
