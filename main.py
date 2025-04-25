@@ -342,6 +342,11 @@ async def button_my_orders(message: Message, state: FSMContext):
     await state.set_state(MenuState.WAREHOUSE_ORDERS)
     await cmd_confirm_order(message, state)
 
+@dp.message(F.text == "✅ Завершенные заказы")
+async def button_completed_orders_warehouse(message: Message, state: FSMContext):
+    await state.set_state(MenuState.WAREHOUSE_COMPLETED_ORDERS)
+    await warehouse.handle_completed_orders(message, state)
+
 @dp.message(F.text == "📥 Приход сырья")
 async def button_income_materials(message: Message, state: FSMContext):
     await state.set_state(MenuState.PRODUCTION_MATERIALS)

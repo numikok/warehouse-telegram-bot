@@ -22,6 +22,7 @@ class MenuState(str, Enum):
     WAREHOUSE_ORDERS = "warehouse_orders"
     WAREHOUSE_INCOME = "warehouse_income"
     WAREHOUSE_MATERIALS = "warehouse_materials"
+    WAREHOUSE_COMPLETED_ORDERS = "warehouse_completed_orders"
     
     # Подменю продаж
     SALES_ORDER = "sales_order"
@@ -60,6 +61,7 @@ MENU_NAVIGATION = {
     MenuState.WAREHOUSE_ORDERS: MenuState.WAREHOUSE_MAIN,
     MenuState.WAREHOUSE_INCOME: MenuState.WAREHOUSE_MAIN,
     MenuState.WAREHOUSE_MATERIALS: MenuState.WAREHOUSE_MAIN,
+    MenuState.WAREHOUSE_COMPLETED_ORDERS: MenuState.WAREHOUSE_MAIN,
     MenuState.WAREHOUSE_MAIN: MenuState.SUPER_ADMIN_MAIN,  # Для возврата из роли склада в супер админа
     
     # Инвентарь - новые состояния для всех ролей
@@ -172,7 +174,8 @@ def get_menu_keyboard(menu_state: MenuState, is_admin_context: bool = False) -> 
         # Главное меню склада
         MenuState.WAREHOUSE_MAIN: [
             [KeyboardButton(text="📦 Остатки")],
-            [KeyboardButton(text="📦 Мои заказы")]
+            [KeyboardButton(text="📦 Мои заказы")],
+            [KeyboardButton(text="✅ Завершенные заказы")]
         ],
         
         # Подменю склада
@@ -192,6 +195,11 @@ def get_menu_keyboard(menu_state: MenuState, is_admin_context: bool = False) -> 
             [KeyboardButton(text="Пустые панели")],
             [KeyboardButton(text="Стыки")],
             [KeyboardButton(text="Клей")],
+            [KeyboardButton(text="◀️ Назад")]
+        ],
+        
+        # Клавиатура для завершенных заказов
+        MenuState.WAREHOUSE_COMPLETED_ORDERS: [
             [KeyboardButton(text="◀️ Назад")]
         ],
         

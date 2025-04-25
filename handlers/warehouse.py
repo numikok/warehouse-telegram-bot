@@ -1,6 +1,6 @@
 from aiogram import Router, F
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from models import User, UserRole, Film, Panel, Joint, Glue, Operation, FinishedProduct, Order, CompletedOrder, OrderStatus, JointType, CompletedOrderJoint, CompletedOrderItem, CompletedOrderGlue
@@ -9,6 +9,8 @@ import json
 import logging
 from navigation import MenuState, get_menu_keyboard, go_back
 from datetime import datetime
+from sqlalchemy.orm import joinedload
+from sqlalchemy import desc
 
 router = Router()
 
@@ -27,6 +29,7 @@ def get_main_keyboard():
 class WarehouseStates(StatesGroup):
     waiting_for_order_id = State()
     waiting_for_confirmation = State()
+    confirming_shipment = State()
 
 @router.message(Command("stock"))
 async def cmd_stock(message: Message, state: FSMContext):
@@ -347,180 +350,367 @@ async def handle_orders(message: Message, state: FSMContext):
 
 @router.message(F.text == "📦 Остатки")
 async def handle_stock(message: Message, state: FSMContext):
-    # Вместо вызова cmd_stock, переходим в меню категорий остатков
-    await state.set_state(MenuState.INVENTORY_CATEGORIES)
+    if not await check_warehouse_access(message):
+        return
     
-    # Получаем текущую роль пользователя
+    await state.set_state(MenuState.WAREHOUSE_STOCK)
     db = next(get_db())
     try:
-        user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
-        user_role = user.role if user else UserRole.NONE
+        # Запрос к базе данных для получения остатков
+        finished_products = db.query(FinishedProduct).options(joinedload(FinishedProduct.film)).all()
+        films = db.query(Film).all()
+        panels = db.query(Panel).all()
+        joints = db.query(Joint).all()
+        glue = db.query(Glue).first()
         
-        # Сохраняем роль и исходное меню, чтобы знать, куда возвращаться
-        if user_role == UserRole.WAREHOUSE:
-            await state.update_data(source_menu=MenuState.WAREHOUSE_MAIN)
-        elif user_role == UserRole.PRODUCTION:
-            await state.update_data(source_menu=MenuState.PRODUCTION_MAIN)
-        elif user_role == UserRole.SUPER_ADMIN:
-            await state.update_data(source_menu=MenuState.SUPER_ADMIN_MAIN)
+        response = "📦 Остатки на складе:\n\n"
+        
+        response += "✅ Готовая продукция:\n"
+        if finished_products:
+            for product in finished_products:
+                response += f"- {product.film.code} ({product.thickness} мм): {product.quantity} шт.\n"
         else:
-            await state.update_data(source_menu=MenuState.WAREHOUSE_MAIN)  # По умолчанию
+            response += "- Нет\n"
+            
+        response += "\n🎞 Пленка:\n"
+        if films:
+            for f in films:
+                response += f"- {f.code}: {f.total_remaining:.2f} метров\n"
+        else:
+            response += "- Нет\n"
+            
+        response += "\n🪵 Панели:\n"
+        if panels:
+            for p in panels:
+                response += f"- Толщина {p.thickness} мм: {p.quantity} шт.\n"
+        else:
+            response += "- Нет\n"
+            
+        response += "\n🔄 Стыки:\n"
+        if joints:
+            for j in joints:
+                response += f"- {j.type.name.capitalize()} ({j.thickness} мм, {j.color}): {j.quantity} шт.\n"
+        else:
+            response += "- Нет\n"
+            
+        response += "\n🧪 Клей:\n"
+        if glue:
+            response += f"- {glue.quantity} шт.\n"
+        else:
+            response += "- Нет\n"
+            
+        await message.answer(response, reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_STOCK))
+    finally:
+        db.close()
+
+@router.message(F.text == "📦 Мои заказы")
+async def handle_my_orders(message: Message, state: FSMContext):
+    if not await check_warehouse_access(message):
+        return
+    
+    await state.set_state(MenuState.WAREHOUSE_ORDERS)
+    db = next(get_db())
+    try:
+        # Получаем заказы со статусом NEW или IN_PROGRESS
+        orders_to_ship = db.query(Order).filter(
+            Order.status.in_([OrderStatus.NEW, OrderStatus.IN_PROGRESS])
+        ).options(
+            joinedload(Order.products),
+            joinedload(Order.joints),
+            joinedload(Order.glues)
+        ).order_by(Order.created_at).all()
         
-        # Получаем клавиатуру для меню категорий
-        keyboard = get_menu_keyboard(MenuState.INVENTORY_CATEGORIES)
+        if not orders_to_ship:
+            await message.answer(
+                "Нет активных заказов для отгрузки.",
+                reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_MAIN)
+            )
+            return
+        
+        response = "📦 Активные заказы для отгрузки:\n\n"
+        keyboard_buttons = []
+        for order in orders_to_ship:
+            response += f"---\n"
+            response += f"Заказ #{order.id}\n"
+            response += f"Статус: {order.status.value}\n"
+            response += f"Клиент: {order.customer_phone}\n"
+            response += f"Адрес: {order.delivery_address}\n"
+            response += f"Монтаж: {'Да' if order.installation_required else 'Нет'}\n"
+            
+            response += "\nПродукция:\n"
+            if order.products:
+                for item in order.products:
+                    response += f"- {item.color} ({item.thickness} мм): {item.quantity} шт.\n"
+            else:
+                response += "- нет\n"
+            
+            response += "\nСтыки:\n"
+            if order.joints:
+                for joint in order.joints:
+                    response += f"- {joint.joint_type.name.capitalize()} ({joint.joint_thickness} мм, {joint.joint_color}): {joint.joint_quantity} шт.\n"
+            else:
+                response += "- нет\n"
+                
+            response += "\nКлей:\n"
+            if order.glues:
+                for glue_item in order.glues:
+                    response += f"- {glue_item.quantity} шт.\n"
+            else:
+                response += "- нет\n"
+                
+            response += f"\n"
+            # Добавляем кнопку для подтверждения отгрузки
+            keyboard_buttons.append([KeyboardButton(text=f"✅ Отгрузить заказ #{order.id}")])
+            
+        # Добавляем кнопку "Назад"
+        keyboard_buttons.append([KeyboardButton(text="◀️ Назад")])
+        
+        reply_markup = ReplyKeyboardMarkup(
+            keyboard=keyboard_buttons,
+            resize_keyboard=True
+        )
+        
+        await message.answer(response, reply_markup=reply_markup)
+        await state.set_state(WarehouseStates.confirming_shipment)
+        
+    finally:
+        db.close()
+
+@router.message(WarehouseStates.confirming_shipment, F.text.startswith("✅ Отгрузить заказ #"))
+async def confirm_shipment(message: Message, state: FSMContext):
+    if not await check_warehouse_access(message):
+        return
+        
+    try:
+        order_id = int(message.text.split("#")[-1])
+    except (IndexError, ValueError):
+        await message.answer("Некорректный формат команды.")
+        return
+        
+    db = next(get_db())
+    try:
+        # Находим заказ для отгрузки
+        order = db.query(Order).filter(
+            Order.id == order_id,
+            Order.status.in_([OrderStatus.NEW, OrderStatus.IN_PROGRESS])
+        ).options(
+            joinedload(Order.products),
+            joinedload(Order.joints),
+            joinedload(Order.glues),
+            joinedload(Order.manager) # Загружаем менеджера
+        ).first()
+        
+        if not order:
+            await message.answer(f"Заказ #{order_id} не найден или уже отгружен.")
+            return
+            
+        # Получаем пользователя-складовщика
+        warehouse_user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
+        if not warehouse_user:
+            await message.answer("Ошибка: пользователь склада не найден.")
+            return
+            
+        # Проверяем наличие всех компонентов
+        # 1. Продукция
+        insufficient_items = []
+        for item in order.products:
+            finished_product = db.query(FinishedProduct).join(Film).filter(
+                Film.code == item.color,
+                FinishedProduct.thickness == item.thickness
+            ).first()
+            if not finished_product or finished_product.quantity < item.quantity:
+                available = finished_product.quantity if finished_product else 0
+                insufficient_items.append(f"- {item.color} ({item.thickness} мм): нужно {item.quantity}, доступно {available}")
+        
+        # 2. Стыки
+        for joint_item in order.joints:
+            joint = db.query(Joint).filter(
+                Joint.type == joint_item.joint_type,
+                Joint.thickness == joint_item.joint_thickness,
+                Joint.color == joint_item.joint_color
+            ).first()
+            if not joint or joint.quantity < joint_item.joint_quantity:
+                available = joint.quantity if joint else 0
+                insufficient_items.append(f"- Стык {joint_item.joint_type.name.capitalize()} ({joint_item.joint_thickness} мм, {joint_item.joint_color}): нужно {joint_item.joint_quantity}, доступно {available}")
+                
+        # 3. Клей
+        for glue_item in order.glues:
+            glue = db.query(Glue).first()
+            if not glue or glue.quantity < glue_item.quantity:
+                available = glue.quantity if glue else 0
+                insufficient_items.append(f"- Клей: нужно {glue_item.quantity}, доступно {available}")
+                
+        # Если чего-то не хватает
+        if insufficient_items:
+            await message.answer(
+                f"❌ Невозможно отгрузить заказ #{order_id}. Не хватает следующих позиций:\n"
+                + "\n".join(insufficient_items),
+                reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_MAIN) # Возвращаем в главное меню склада
+            )
+            await state.set_state(MenuState.WAREHOUSE_MAIN)
+            return
+            
+        # Если всего хватает, списываем со склада и переносим в completed_orders
+        # 1. Списываем продукцию
+        for item in order.products:
+            finished_product = db.query(FinishedProduct).join(Film).filter(
+                Film.code == item.color,
+                FinishedProduct.thickness == item.thickness
+            ).first()
+            finished_product.quantity -= item.quantity
+            
+        # 2. Списываем стыки
+        for joint_item in order.joints:
+            joint = db.query(Joint).filter(
+                Joint.type == joint_item.joint_type,
+                Joint.thickness == joint_item.joint_thickness,
+                Joint.color == joint_item.joint_color
+            ).first()
+            joint.quantity -= joint_item.joint_quantity
+            
+        # 3. Списываем клей
+        for glue_item in order.glues:
+            glue = db.query(Glue).first()
+            glue.quantity -= glue_item.quantity
+            
+        # Создаем запись в completed_orders
+        completed_order = CompletedOrder(
+            order_id=order.id,
+            manager_id=order.manager_id,
+            warehouse_user_id=warehouse_user.id,
+            installation_required=order.installation_required,
+            customer_phone=order.customer_phone,
+            delivery_address=order.delivery_address,
+            completed_at=datetime.utcnow()
+        )
+        db.add(completed_order)
+        db.flush() # Получаем ID для completed_order
+        
+        # Копируем связанные объекты (items, joints, glues)
+        for item in order.products:
+            comp_item = CompletedOrderItem(
+                order_id=completed_order.id,
+                quantity=item.quantity,
+                color=item.color,
+                thickness=item.thickness
+            )
+            db.add(comp_item)
+            
+        for joint_item in order.joints:
+            comp_joint = CompletedOrderJoint(
+                order_id=completed_order.id,
+                joint_type=joint_item.joint_type,
+                joint_color=joint_item.joint_color,
+                quantity=joint_item.joint_quantity,
+                joint_thickness=joint_item.joint_thickness
+            )
+            db.add(comp_joint)
+            
+        for glue_item in order.glues:
+            comp_glue = CompletedOrderGlue(
+                order_id=completed_order.id,
+                quantity=glue_item.quantity
+            )
+            db.add(comp_glue)
+            
+        # Удаляем исходный заказ из таблицы orders
+        db.delete(order)
+        
+        db.commit()
         
         await message.answer(
-            "Выберите категорию остатков для просмотра:",
-            reply_markup=keyboard
+            f"✅ Заказ #{order_id} успешно отгружен и перемещен в завершенные.",
+            reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_MAIN)
+        )
+        
+        # Переводим обратно в главное меню склада
+        await state.set_state(MenuState.WAREHOUSE_MAIN)
+        
+    except Exception as e:
+        db.rollback()
+        logging.error(f"Ошибка при отгрузке заказа #{order_id}: {e}", exc_info=True)
+        await message.answer(f"Произошла ошибка при отгрузке заказа: {e}")
+    finally:
+        db.close()
+
+@router.message(F.text == "✅ Завершенные заказы")
+async def handle_completed_orders(message: Message, state: FSMContext):
+    """Отображает список завершенных заказов"""
+    if not await check_warehouse_access(message):
+        return
+    
+    await state.set_state(MenuState.WAREHOUSE_COMPLETED_ORDERS)
+    db = next(get_db())
+    try:
+        # Получаем последние 20 завершенных заказов
+        completed_orders = db.query(CompletedOrder).options(
+            joinedload(CompletedOrder.items),
+            joinedload(CompletedOrder.joints),
+            joinedload(CompletedOrder.glues),
+            joinedload(CompletedOrder.manager),
+            joinedload(CompletedOrder.warehouse_user)
+        ).order_by(desc(CompletedOrder.completed_at)).limit(20).all()
+        
+        if not completed_orders:
+            await message.answer(
+                "Нет завершенных заказов.",
+                reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_COMPLETED_ORDERS)
+            )
+            return
+            
+        response = "✅ Завершенные заказы (последние 20):\n\n"
+        for order in completed_orders:
+            response += f"---\n"
+            response += f"Заказ #{order.order_id} (Завершен #{order.id})\n"
+            response += f"Дата завершения: {order.completed_at.strftime('%Y-%m-%d %H:%M')}\n"
+            response += f"Клиент: {order.customer_phone}\n"
+            response += f"Адрес: {order.delivery_address}\n"
+            response += f"Монтаж: {'Да' if order.installation_required else 'Нет'}\n"
+            response += f"Менеджер: {order.manager.username if order.manager else 'N/A'}\n"
+            response += f"Склад: {order.warehouse_user.username if order.warehouse_user else 'N/A'}\n"
+            
+            response += "\nПродукция:\n"
+            if order.items:
+                for item in order.items:
+                    response += f"- {item.color} ({item.thickness} мм): {item.quantity} шт.\n"
+            else:
+                response += "- нет\n"
+            
+            response += "\nСтыки:\n"
+            if order.joints:
+                for joint in order.joints:
+                    response += f"- {joint.joint_type.name.capitalize()} ({joint.joint_thickness} мм, {joint.joint_color}): {joint.quantity} шт.\n"
+            else:
+                response += "- нет\n"
+                
+            response += "\nКлей:\n"
+            if order.glues:
+                for glue_item in order.glues:
+                    response += f"- {glue_item.quantity} шт.\n"
+            else:
+                response += "- нет\n"
+            response += f"\n"
+            
+        # Ограничиваем длину сообщения, если оно слишком большое
+        if len(response) > 4000: # Telegram limit is 4096
+            response = response[:4000] + "\n... (список слишком длинный)"
+            
+        await message.answer(
+            response,
+            reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_COMPLETED_ORDERS)
+        )
+            
+    except Exception as e:
+        logging.error(f"Ошибка при получении завершенных заказов: {e}", exc_info=True)
+        await message.answer(
+            "Произошла ошибка при загрузке завершенных заказов.",
+            reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_COMPLETED_ORDERS)
         )
     finally:
         db.close()
 
-# Обработчик для всех остатков сразу
-@router.message(F.text == "📊 Все остатки")
-async def handle_all_stock(message: Message, state: FSMContext):
-    # Вызываем старую функцию показа всех остатков
-    await cmd_stock(message, state)
-
-# Обработчик для готовой продукции
-@router.message(F.text == "✅ Готовая продукция")
-async def handle_finished_products(message: Message, state: FSMContext):
-    await state.set_state(MenuState.INVENTORY_FINISHED_PRODUCTS)
-    
-    db = next(get_db())
-    try:
-        # Получаем список готовой продукции
-        finished_products = db.query(FinishedProduct).join(Film).all()
-        
-        response = "✅ Готовая продукция на складе:\n\n"
-        if finished_products:
-            for product in finished_products:
-                if product.quantity > 0:
-                    response += f"- {product.film.code} (толщина {product.thickness} мм): {product.quantity} шт.\n"
-        else:
-            response += "Нет в наличии\n"
-        
-        # Возвращаем клавиатуру для возврата в меню категорий
-        keyboard = get_menu_keyboard(MenuState.INVENTORY_FINISHED_PRODUCTS)
-        await message.answer(response, reply_markup=keyboard)
-    finally:
-        db.close()
-
-# Обработчик для пленки
-@router.message(F.text == "🎞 Пленка")
-async def handle_films(message: Message, state: FSMContext):
-    await state.set_state(MenuState.INVENTORY_FILMS)
-    
-    db = next(get_db())
-    try:
-        # Получаем список пленок
-        films = db.query(Film).all()
-        
-        response = "🎞 Пленки на складе:\n\n"
-        if films:
-            for film in films:
-                meters_per_roll = film.meters_per_roll or 50.0  # По умолчанию 50 метров в рулоне
-                rolls = film.total_remaining / meters_per_roll if meters_per_roll > 0 else 0
-                response += (
-                    f"- {film.code}:\n"
-                    f"  • Рулонов: {rolls:.1f}\n"
-                    f"  • Общая длина: {film.total_remaining:.2f} м\n"
-                    f"  • Можно произвести панелей: {film.calculate_possible_panels()}\n\n"
-                )
-        else:
-            response += "Нет в наличии\n"
-        
-        # Возвращаем клавиатуру для возврата в меню категорий
-        keyboard = get_menu_keyboard(MenuState.INVENTORY_FILMS)
-        await message.answer(response, reply_markup=keyboard)
-    finally:
-        db.close()
-
-# Обработчик для панелей
-@router.message(F.text == "🪵 Панели")
-async def handle_panels(message: Message, state: FSMContext):
-    await state.set_state(MenuState.INVENTORY_PANELS)
-    
-    db = next(get_db())
-    try:
-        # Получаем список панелей
-        panels = db.query(Panel).all()
-        
-        response = "🪵 Пустые панели на складе:\n\n"
-        if panels:
-            for panel in panels:
-                response += f"- Толщина {panel.thickness} мм: {panel.quantity} шт.\n"
-        else:
-            response += "Нет в наличии\n"
-        
-        # Возвращаем клавиатуру для возврата в меню категорий
-        keyboard = get_menu_keyboard(MenuState.INVENTORY_PANELS)
-        await message.answer(response, reply_markup=keyboard)
-    finally:
-        db.close()
-
-# Обработчик для стыков
-@router.message(F.text == "🔄 Стыки")
-async def handle_joints(message: Message, state: FSMContext):
-    await state.set_state(MenuState.INVENTORY_JOINTS)
-    
-    db = next(get_db())
-    try:
-        # Получаем список стыков
-        joints = db.query(Joint).all()
-        
-        response = "🔄 Стыки на складе:\n\n"
-        if joints:
-            for joint in joints:
-                response += (
-                    f"- {joint.color} ({joint.type.value}, {joint.thickness} мм):\n"
-                    f"  • Количество: {joint.quantity}\n"
-                )
-        else:
-            response += "Нет в наличии\n"
-        
-        # Возвращаем клавиатуру для возврата в меню категорий
-        keyboard = get_menu_keyboard(MenuState.INVENTORY_JOINTS)
-        await message.answer(response, reply_markup=keyboard)
-    finally:
-        db.close()
-
-# Обработчик для клея
-@router.message(F.text == "🧪 Клей")
-async def handle_glue(message: Message, state: FSMContext):
-    await state.set_state(MenuState.INVENTORY_GLUE)
-    
-    db = next(get_db())
-    try:
-        # Получаем информацию о клее
-        glue = db.query(Glue).first()
-        
-        response = "🧪 Клей на складе:\n\n"
-        if glue:
-            response += f"Количество: {glue.quantity}\n"
-        else:
-            response += "Нет в наличии\n"
-        
-        # Возвращаем клавиатуру для возврата в меню категорий
-        keyboard = get_menu_keyboard(MenuState.INVENTORY_GLUE)
-        await message.answer(response, reply_markup=keyboard)
-    finally:
-        db.close()
-
-@router.message(Command("start"))
-async def cmd_start(message: Message, state: FSMContext):
-    if not await check_warehouse_access(message):
-        return
-    
-    await state.set_state(MenuState.WAREHOUSE_MAIN)
-    await message.answer(
-        "Выберите действие:",
-        reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_MAIN)
-    )
-
 @router.message(F.text == "◀️ Назад")
 async def handle_back(message: Message, state: FSMContext):
-    """Обработка нажатия на кнопку 'Назад'"""
     db = next(get_db())
     try:
         user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
