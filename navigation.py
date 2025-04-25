@@ -245,6 +245,7 @@ def get_menu_keyboard(menu_state: MenuState, is_admin_context: bool = False) -> 
             [KeyboardButton(text="📊 Общая статистика")],
             [KeyboardButton(text="📈 Отчет по продажам")],
             [KeyboardButton(text="🏭 Отчет по производству")],
+            [KeyboardButton(text="📝 История операций")],
             [KeyboardButton(text="◀️ Назад")]
         ],
         

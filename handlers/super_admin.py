@@ -364,14 +364,51 @@ async def handle_operations_history(message: Message, state: FSMContext):
         for op in operations:
             performer = db.query(User).filter(User.id == op.user_id).first()
             
-            report += (
+            # Базовая информация об операции
+            operation_info = (
                 f"Операция #{op.id}\n"
                 f"📅 {op.timestamp.strftime('%d.%m.%Y %H:%M')}\n"
                 f"👤 Пользователь: {performer.username if performer else 'Неизвестный'}\n"
+                f"🔰 Роль: {performer.role.value if performer else 'Неизвестная'}\n"
                 f"🔄 Тип: {op.operation_type}\n"
                 f"📊 Количество: {op.quantity}\n"
-                "-------------------\n"
             )
+            
+            # Детальная информация по типу операции
+            details = {}
+            if op.details:
+                try:
+                    details = json.loads(op.details)
+                    
+                    if op.operation_type.startswith("panel"):
+                        operation_info += f"🪵 Толщина: {details.get('panel_thickness', 'Н/Д')} мм\n"
+                    
+                    elif op.operation_type.startswith("film"):
+                        operation_info += f"🎨 Код: {details.get('film_code', 'Н/Д')}\n"
+                        if "roll_length" in details:
+                            operation_info += f"📏 Длина: {details.get('roll_length', 'Н/Д')} м\n"
+                    
+                    elif op.operation_type.startswith("joint"):
+                        operation_info += f"⚙️ Тип: {details.get('joint_type', 'Н/Д')}\n"
+                        operation_info += f"🎨 Цвет: {details.get('joint_color', 'Н/Д')}\n"
+                        operation_info += f"📏 Толщина: {details.get('joint_thickness', 'Н/Д')} мм\n"
+                    
+                    # Дополнительная информация для операций брака
+                    if "is_defect" in details and details["is_defect"]:
+                        operation_info += "🚫 Признак брака: Да\n"
+                    
+                    # Для заказов добавляем детали
+                    if op.operation_type == "order":
+                        operation_info += f"🎨 Пленка: {details.get('film_code', 'Н/Д')}\n"
+                        operation_info += f"⚙️ Стыки: {details.get('joint_color', 'Н/Д')} - {details.get('joint_quantity', 'Н/Д')} шт.\n"
+                        operation_info += f"🧪 Клей: {details.get('glue_quantity', 'Н/Д')} шт.\n"
+                        installation = "Да" if details.get("installation", False) else "Нет"
+                        operation_info += f"🔧 Монтаж: {installation}\n"
+                    
+                except json.JSONDecodeError:
+                    operation_info += "⚠️ Детали операции не удалось расшифровать\n"
+            
+            report += operation_info + "-------------------\n"
         
         await message.answer(report, reply_markup=get_menu_keyboard(MenuState.SUPER_ADMIN_REPORTS))
     finally:
