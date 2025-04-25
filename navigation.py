@@ -65,7 +65,6 @@ MENU_NAVIGATION = {
     MenuState.WAREHOUSE_MAIN: MenuState.SUPER_ADMIN_MAIN,  # Для возврата из роли склада в супер админа
     
     # Инвентарь - новые состояния для всех ролей
-    MenuState.INVENTORY_CATEGORIES: MenuState.WAREHOUSE_MAIN,  # По умолчанию возврат в меню склада
     MenuState.INVENTORY_FINISHED_PRODUCTS: MenuState.INVENTORY_CATEGORIES,
     MenuState.INVENTORY_FILMS: MenuState.INVENTORY_CATEGORIES,
     MenuState.INVENTORY_PANELS: MenuState.INVENTORY_CATEGORIES,

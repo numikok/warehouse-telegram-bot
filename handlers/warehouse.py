@@ -350,10 +350,24 @@ async def handle_orders(message: Message, state: FSMContext):
 
 @router.message(F.text == "📦 Остатки")
 async def handle_stock(message: Message, state: FSMContext):
+    """Показывает меню выбора категорий остатков"""
     if not await check_warehouse_access(message):
         return
     
-    await state.set_state(MenuState.WAREHOUSE_STOCK)
+    await state.set_state(MenuState.INVENTORY_CATEGORIES)
+    keyboard = get_menu_keyboard(MenuState.INVENTORY_CATEGORIES)
+    await message.answer(
+        "Выберите категорию остатков для просмотра:",
+        reply_markup=keyboard
+    )
+
+@router.message(F.text == "📊 Все остатки")
+async def handle_all_stock(message: Message, state: FSMContext):
+    """Показывает все остатки на складе"""
+    if not await check_warehouse_access(message):
+        return
+        
+    await state.set_state(MenuState.WAREHOUSE_STOCK) # Используем существующее состояние
     db = next(get_db())
     try:
         # Запрос к базе данных для получения остатков
@@ -363,43 +377,141 @@ async def handle_stock(message: Message, state: FSMContext):
         joints = db.query(Joint).all()
         glue = db.query(Glue).first()
         
-        response = "📦 Остатки на складе:\n\n"
+        response = "📦 Все остатки на складе:\n\n"
         
         response += "✅ Готовая продукция:\n"
         if finished_products:
             for product in finished_products:
-                response += f"- {product.film.code} ({product.thickness} мм): {product.quantity} шт.\n"
-        else:
-            response += "- Нет\n"
+                 if product.quantity > 0:
+                    response += f"- {product.film.code} ({product.thickness} мм): {product.quantity} шт.\n"
+        if not any(p.quantity > 0 for p in finished_products):
+             response += "- Нет\n"
             
         response += "\n🎞 Пленка:\n"
         if films:
             for f in films:
-                response += f"- {f.code}: {f.total_remaining:.2f} метров\n"
-        else:
-            response += "- Нет\n"
+                 if f.total_remaining > 0:
+                    response += f"- {f.code}: {f.total_remaining:.2f} метров\n"
+        if not any(f.total_remaining > 0 for f in films):
+             response += "- Нет\n"
             
         response += "\n🪵 Панели:\n"
         if panels:
             for p in panels:
-                response += f"- Толщина {p.thickness} мм: {p.quantity} шт.\n"
-        else:
-            response += "- Нет\n"
+                 if p.quantity > 0:
+                    response += f"- Толщина {p.thickness} мм: {p.quantity} шт.\n"
+        if not any(p.quantity > 0 for p in panels):
+             response += "- Нет\n"
             
         response += "\n🔄 Стыки:\n"
         if joints:
             for j in joints:
-                response += f"- {j.type.name.capitalize()} ({j.thickness} мм, {j.color}): {j.quantity} шт.\n"
-        else:
-            response += "- Нет\n"
+                 if j.quantity > 0:
+                    response += f"- {j.type.name.capitalize()} ({j.thickness} мм, {j.color}): {j.quantity} шт.\n"
+        if not any(j.quantity > 0 for j in joints):
+             response += "- Нет\n"
             
         response += "\n🧪 Клей:\n"
-        if glue:
+        if glue and glue.quantity > 0:
             response += f"- {glue.quantity} шт.\n"
         else:
             response += "- Нет\n"
             
         await message.answer(response, reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_STOCK))
+    finally:
+        db.close()
+
+@router.message(F.text == "✅ Готовая продукция")
+async def handle_finished_products(message: Message, state: FSMContext):
+    if not await check_warehouse_access(message): return
+    await state.set_state(MenuState.INVENTORY_FINISHED_PRODUCTS)
+    
+    db = next(get_db())
+    try:
+        finished_products = db.query(FinishedProduct).join(Film).filter(FinishedProduct.quantity > 0).all()
+        response = "✅ Готовая продукция на складе:\n\n"
+        if finished_products:
+            for product in finished_products:
+                response += f"- {product.film.code} (толщина {product.thickness} мм): {product.quantity} шт.\n"
+        else:
+            response += "Нет в наличии\n"
+        keyboard = get_menu_keyboard(MenuState.INVENTORY_FINISHED_PRODUCTS)
+        await message.answer(response, reply_markup=keyboard)
+    finally:
+        db.close()
+
+@router.message(F.text == "🎞 Пленка")
+async def handle_films(message: Message, state: FSMContext):
+    if not await check_warehouse_access(message): return
+    await state.set_state(MenuState.INVENTORY_FILMS)
+    
+    db = next(get_db())
+    try:
+        films = db.query(Film).filter(Film.total_remaining > 0).all()
+        response = "🎞 Пленки на складе:\n\n"
+        if films:
+            for film in films:
+                response += f"- {film.code}: {film.total_remaining:.2f} метров\n"
+        else:
+            response += "Нет в наличии\n"
+        keyboard = get_menu_keyboard(MenuState.INVENTORY_FILMS)
+        await message.answer(response, reply_markup=keyboard)
+    finally:
+        db.close()
+
+@router.message(F.text == "🪵 Панели")
+async def handle_panels(message: Message, state: FSMContext):
+    if not await check_warehouse_access(message): return
+    await state.set_state(MenuState.INVENTORY_PANELS)
+    
+    db = next(get_db())
+    try:
+        panels = db.query(Panel).filter(Panel.quantity > 0).all()
+        response = "🪵 Пустые панели на складе:\n\n"
+        if panels:
+            for panel in panels:
+                response += f"- Толщина {panel.thickness} мм: {panel.quantity} шт.\n"
+        else:
+            response += "Нет в наличии\n"
+        keyboard = get_menu_keyboard(MenuState.INVENTORY_PANELS)
+        await message.answer(response, reply_markup=keyboard)
+    finally:
+        db.close()
+
+@router.message(F.text == "🔄 Стыки")
+async def handle_joints(message: Message, state: FSMContext):
+    if not await check_warehouse_access(message): return
+    await state.set_state(MenuState.INVENTORY_JOINTS)
+    
+    db = next(get_db())
+    try:
+        joints = db.query(Joint).filter(Joint.quantity > 0).all()
+        response = "🔄 Стыки на складе:\n\n"
+        if joints:
+            for joint in joints:
+                response += f"- {joint.type.name.capitalize()} ({joint.thickness} мм, {joint.color}): {joint.quantity} шт.\n"
+        else:
+            response += "Нет в наличии\n"
+        keyboard = get_menu_keyboard(MenuState.INVENTORY_JOINTS)
+        await message.answer(response, reply_markup=keyboard)
+    finally:
+        db.close()
+
+@router.message(F.text == "🧪 Клей")
+async def handle_glue(message: Message, state: FSMContext):
+    if not await check_warehouse_access(message): return
+    await state.set_state(MenuState.INVENTORY_GLUE)
+    
+    db = next(get_db())
+    try:
+        glue = db.query(Glue).filter(Glue.quantity > 0).first()
+        response = "🧪 Клей на складе:\n\n"
+        if glue:
+            response += f"Количество: {glue.quantity} шт.\n"
+        else:
+            response += "Нет в наличии\n"
+        keyboard = get_menu_keyboard(MenuState.INVENTORY_GLUE)
+        await message.answer(response, reply_markup=keyboard)
     finally:
         db.close()
 
@@ -1133,9 +1245,10 @@ async def check_warehouse_access(message: Message) -> bool:
     db = next(get_db())
     try:
         user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
-        
-        if not user or user.role not in [UserRole.WAREHOUSE, UserRole.SUPER_ADMIN]:
-            await message.answer("У вас нет прав для выполнения этой команды.")
+        # Доступ к остаткам есть у Склада, Производства и Суперадмина
+        allowed_roles = [UserRole.WAREHOUSE, UserRole.PRODUCTION, UserRole.SUPER_ADMIN]
+        if not user or user.role not in allowed_roles:
+            await message.answer("У вас нет прав для просмотра остатков.")
             return False
         return True
     finally:
