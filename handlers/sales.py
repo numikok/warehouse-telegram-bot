@@ -1727,7 +1727,7 @@ async def process_panel_thickness(message: Message, state: FSMContext):
             )
             
             await message.answer(
-                f"Выберите код пленки для панелей толщиной {thickness} мм:",
+                f"Выберите цвет пленки для панелей толщиной {thickness} мм:",
                 reply_markup=reply_markup
             )
             await state.set_state(SalesStates.waiting_for_film_color)
@@ -1895,12 +1895,10 @@ async def process_film_color(message: Message, state: FSMContext):
         
         # Формируем сообщение с информацией о пленке и возможном производстве
         info_text = (
-            f"📋 Информация о выбранной пленке {film.code}:\n\n"
-            f"• Толщина панелей: {panel_thickness} мм\n"
-            f"• Общее количество оставшейся пленки: {remaining_meters:.2f} метров\n"
-            f"• Расход пленки на одну панель: {film.panel_consumption:.2f} метров\n"
-            f"• Возможно произвести панелей: {possible_panels} шт.\n\n"
-            f"Введите количество панелей для производства:"
+            f"📋 Информация о выбранном цвете {film.code}:\\n\\n"
+            f"• Толщина панелей: {panel_thickness} мм\\n"
+            f"• Возможно произвести: {possible_panels} шт.\\n\\n"
+            f"Введите количество:"
         )
         
         # Запрашиваем количество панелей
@@ -1949,7 +1947,7 @@ async def process_panel_quantity(message: Message, state: FSMContext):
             )
             
             await message.answer(
-                f"Выберите код пленки для панелей толщиной {thickness} мм:",
+                f"Выберите цвет пленки для панелей толщиной {thickness} мм:",
                 reply_markup=reply_markup
             )
             await state.set_state(SalesStates.waiting_for_film_color)
@@ -1984,8 +1982,8 @@ async def process_panel_quantity(message: Message, state: FSMContext):
             possible_panels = film.calculate_possible_panels()
             if quantity > possible_panels:
                 await message.answer(
-                    f"❌ Недостаточно пленки для производства {quantity} панелей.\n"
-                    f"Максимально возможное количество: {possible_panels} панелей.\n"
+                    f"❌ Недостаточно пленки для производства {quantity} панелей.\\n"
+                    f"Максимально возможное количество: {possible_panels} панелей.\\n"
                     f"Пожалуйста, введите другое количество:"
                 )
                 return
@@ -2007,9 +2005,9 @@ async def process_panel_quantity(message: Message, state: FSMContext):
             
             # Формируем сообщение о созданном заказе
             order_text = (
-                f"✅ Заказ на производство #{production_order.id} успешно создан!\n\n"
-                f"Толщина панелей: {panel_thickness} мм\n"  # Добавляем информацию о толщине
-                f"Пленка: {production_order.film_color}\n"
+                f"✅ Заказ #{production_order.id} успешно создан!\\n\\n"
+                f"Толщина панелей: {panel_thickness} мм\\n"  # Добавляем информацию о толщине
+                f"Цвет: {production_order.film_color}\\n"
                 f"Количество панелей: {production_order.panel_quantity}"
             )
             
@@ -2018,7 +2016,7 @@ async def process_panel_quantity(message: Message, state: FSMContext):
             # Возвращаем клавиатуру менеджера
             keyboard = ReplyKeyboardMarkup(
                 keyboard=[
-                    [KeyboardButton(text="📝 Заказать производство")],
+                    [KeyboardButton(text="📝 Заказать")],
                     [KeyboardButton(text="📦 Заказать на склад")],
                     [KeyboardButton(text="📦 Количество готовой продукции")]
                 ],
@@ -2096,7 +2094,7 @@ async def process_panels_count(message: Message, state: FSMContext):
             # Возвращаем клавиатуру менеджера
             keyboard = ReplyKeyboardMarkup(
                 keyboard=[
-                    [KeyboardButton(text="📝 Заказать производство")],
+                    [KeyboardButton(text="📝 Заказать")],
                     [KeyboardButton(text="📦 Заказать на склад")],
                     [KeyboardButton(text="📦 Количество готовой продукции")]
                 ],
