@@ -1,0 +1,49 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Common Issues and Troubleshooting
+
+This guide covers frequent issues and their solutions in the bot system.
+
+## State Handling Issues
+
+### Issue: Buttons Not Working in Defect Menu
+
+When buttons don't respond in the defect type selection menu:
+- Check if proper handlers exist for all defect types in [handlers/production.py](mdc:handlers/production.py)
+- Ensure state transitions are correctly set up for `ProductionStates.waiting_for_defect_type`
+- Look for state mismatch between expected and actual states (may be formatted as "production_states:waiting_for_defect_type")
+
+### Issue: State Persistence Problems
+
+If the bot seems to be in the wrong state:
+- The `debug_defect_type_handler` provides fallback handling for defect type selection
+- Use logging to check current state with `current_state = await state.get_state()`
+- Verify appropriate error handling for all states
+
+## Database Issues
+
+### Issue: Missing Materials
+
+When materials don't appear in selection menus:
+- Check if the materials were properly added to the database
+- Ensure database connection is working with `db = next(get_db())`
+- Verify queries are properly formatted for material retrieval
+
+### Issue: Inventory Discrepancies
+
+If inventory counts seem incorrect:
+- Review Operation records to trace all transactions
+- Check for any missing transaction records in operations with `is_defect` flag
+- Ensure all handlers properly update inventory counts
+
+## Menu Navigation
+
+### Issue: Incorrect Menu Displayed
+
+If the wrong menu is shown after an operation:
+- Check `MENU_NAVIGATION` definitions in [navigation.py](mdc:navigation.py)
+- Verify the state is properly set after each operation
+- Ensure `get_menu_keyboard` is called with the correct MenuState

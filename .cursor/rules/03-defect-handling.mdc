@@ -1,0 +1,39 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Defect Handling System
+
+The bot includes a comprehensive system for recording manufacturing defects across different material types.
+
+## Defect Types
+
+The system handles defects for four material types:
+- **Panel Defects**: Damaged or irregular panels of different thicknesses (0.5mm or 0.8mm)
+- **Film Defects**: Issues with coating films of various colors/codes
+- **Joint Defects**: Problems with different joint types (Butterfly, Simple, Closing)
+- **Glue Defects**: Tracking of defective adhesive materials
+
+## Defect Workflow
+
+The defect handling process is defined in [handlers/production.py](mdc:handlers/production.py):
+
+1. User selects "🚫 Брак" (Defect) from the production menu
+2. System prompts for defect type using the `ProductionStates.waiting_for_defect_type` state
+3. Based on material selected, system follows a specific workflow:
+   - For panels: Request thickness → quantity
+   - For films: Request film color → meters
+   - For joints: Request joint type → color → thickness → quantity
+   - For glue: Request quantity directly
+
+## Implementation Details
+
+- `handle_defect`: Main entry point for defect processing
+- Material-specific handlers:
+  - `handle_panel_defect`: Processes panel defects
+  - `handle_film_defect`: Processes film defects
+  - `handle_joint_defect`: Processes joint defects
+  - `handle_glue_defect`: Processes glue defects
+- Each defect record is stored in the database with an operation_type indicating defect source
+- Inventory is automatically adjusted when defects are recorded

@@ -1,7 +1,7 @@
 """add_film_thickness_to_models
 
 Revision ID: 3bd7046278f0
-Revises: update_operation_type
+Revises: 753906409270
 Create Date: 2025-04-16 20:28:19.824792
 
 """
@@ -13,7 +13,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = '3bd7046278f0'
-down_revision: Union[str, None] = 'update_operation_type'
+down_revision: Union[str, None] = '753906409270'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

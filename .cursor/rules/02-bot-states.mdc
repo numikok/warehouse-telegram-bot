@@ -1,0 +1,41 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Bot States and Navigation
+
+The bot operates on a finite state machine (FSM) model to handle different workflows.
+
+## Menu States
+
+[navigation.py](mdc:navigation.py) defines the menu structure through the `MenuState` enum:
+
+- Main menus for each role (SUPER_ADMIN_MAIN, SALES_MAIN, WAREHOUSE_MAIN, PRODUCTION_MAIN)
+- Production submenus (PRODUCTION_MATERIALS, PRODUCTION_DEFECT, PRODUCTION_PROCESS, PRODUCTION_ORDERS)
+- Warehouse submenus (WAREHOUSE_STOCK, WAREHOUSE_ORDERS, WAREHOUSE_INCOME, WAREHOUSE_MATERIALS)
+- Sales submenus (SALES_ORDER, SALES_STOCK, SALES_HISTORY, SALES_CREATE_ORDER, SALES_ORDER_CONFIRM)
+- Admin submenus (SUPER_ADMIN_USERS, SUPER_ADMIN_REPORTS, etc.)
+
+## Process States
+
+[states.py](mdc:states.py) defines detailed process states for each operation:
+
+### Production States
+- Material handling states (waiting_for_panel_thickness, waiting_for_film_code, etc.)
+- Production process states (waiting_for_production_panel_thickness, etc.)
+- Defect handling states (waiting_for_defect_type, waiting_for_defect_panel_thickness, etc.)
+- Order management states
+
+### Other Process States
+- Order states for creating and processing customer orders
+- Warehouse states for managing inventory
+- Sales states for managing customer relationships
+
+## Navigation Flow
+
+1. User selects a main menu based on their role
+2. Based on selected option, the bot transitions to appropriate submenu
+3. Each process has a sequence of states to collect required information
+4. Back buttons allow navigation to previous menus
+5. Process completion returns to the appropriate menu

@@ -1,0 +1,38 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# User Role System
+
+The bot implements a role-based access control system to manage different permissions and workflows.
+
+## Available Roles
+
+Defined in [models.py](mdc:models.py) through the `UserRole` enum:
+
+- **SUPER_ADMIN**: Complete access to all bot functions
+- **SALES_MANAGER**: Access to order creation and management
+- **WAREHOUSE**: Access to inventory and material management
+- **PRODUCTION**: Access to manufacturing processes and defect recording
+- **NONE**: Default role for unassigned users
+
+## Role-based Navigation
+
+Each role has access to different menu systems:
+
+- **SUPER_ADMIN**: Can access all menus and switch between roles
+- **SALES_MANAGER**: Can only access sales-related functions
+- **WAREHOUSE**: Can only access warehouse and inventory functions
+- **PRODUCTION**: Can only access manufacturing functions
+
+## Access Control
+
+The system implements access control through checker functions:
+
+- `check_production_access`: Ensures only production staff or admins can access production features
+- Similar checkers exist for warehouse and sales functions
+
+## Role Assignment
+
+Roles are assigned by super administrators through the admin menu, with actions stored in the database.

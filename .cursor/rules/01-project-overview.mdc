@@ -1,0 +1,32 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Manufacturing Management Bot
+
+This Telegram bot is designed to manage a manufacturing facility's operations, including materials tracking, production processes, and defect handling.
+
+## Core Functionality
+
+- **Production Management**: Tracking manufacturing operations
+- **Materials Management**: Handling inventory of panels, films, joints, and glue
+- **Defect Tracking**: Recording and managing manufacturing defects
+- **User Roles**: Different access levels for various factory roles
+
+## Key Files
+
+- **Main Bot Files**: 
+  - [main.py](mdc:main.py) - Bot initialization and basic handlers
+  - [states.py](mdc:states.py) - FSM state definitions for all workflows
+  - [navigation.py](mdc:navigation.py) - Menu navigation system and keyboard layouts
+
+- **Role-specific Handlers**:
+  - [handlers/production.py](mdc:handlers/production.py) - Production process management
+  - [handlers/warehouse.py](mdc:handlers/warehouse.py) - Warehouse operations
+  - [handlers/sales.py](mdc:handlers/sales.py) - Sales management
+  - [handlers/orders.py](mdc:handlers/orders.py) - Order processing
+
+- **Data Management**:
+  - [models.py](mdc:models.py) - Database models
+  - [database.py](mdc:database.py) - Database connection handling

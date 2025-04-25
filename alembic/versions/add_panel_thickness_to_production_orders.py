@@ -1,7 +1,7 @@
 """Add panel_thickness to production_orders
 
 Revision ID: add_panel_thickness_to_production_orders
-Revises: 87d430abf123
+Revises: e50b65a6b669
 Create Date: 2025-04-18 15:00:00
 
 """
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = 'add_panel_thickness_to_production_orders'
-down_revision = '87d430abf123'
+down_revision = 'e50b65a6b669'
 branch_labels = None
 depends_on = None
 

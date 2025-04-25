@@ -1,0 +1,47 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Production Workflow System
+
+The production module manages the manufacturing process from raw materials to finished products.
+
+## Main Production Flows
+
+All production workflows are implemented in [handlers/production.py](mdc:handlers/production.py):
+
+### 1. Material Intake
+
+- **Panels**: Record incoming panels with specific thickness (0.5mm or 0.8mm)
+- **Films**: Register new film rolls with color code, quantity, and measurements
+- **Joints**: Add joints with type (Butterfly, Simple, Closing), color, and thickness
+- **Glue**: Record adhesive inventory increases
+
+### 2. Manufacturing Process
+
+The `handle_production` function manages the main production process:
+
+1. Select panel thickness for manufacturing
+2. Choose film color/code to be applied
+3. Specify production quantity
+4. System calculates material requirements and updates inventory
+
+### 3. Defect Handling
+
+As detailed in the defect handling rule, the system records different types of defects and adjusts inventory accordingly.
+
+### 4. Order Management
+
+The production system handles manufacturing orders from the sales department:
+- View pending orders
+- Mark orders as completed
+- Update inventory based on fulfilled orders
+
+## Inventory Tracking
+
+Each material operation (income, consumption, defect) is recorded in the Operations table with:
+- User who performed the action
+- Operation type
+- Quantity
+- Detailed JSON with operation specifics
