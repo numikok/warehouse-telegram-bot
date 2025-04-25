@@ -240,7 +240,7 @@ def get_menu_keyboard(menu_state: MenuState, is_admin_context: bool = False) -> 
             [KeyboardButton(text="💼 Роль менеджера по продажам")],
             [KeyboardButton(text="📦 Роль склада")],
             [KeyboardButton(text="🏭 Роль производства")],
-            [KeyboardButton(text="��🇳 Заказ в Китай")]
+            [KeyboardButton(text="Заказ в Китай")]
         ],
         
         # Подменю супер-админа

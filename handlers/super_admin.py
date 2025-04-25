@@ -173,7 +173,7 @@ async def handle_production_role(message: Message, state: FSMContext):
     finally:
         db.close()
 
-@router.message(F.text == "🇨🇳 Заказ в Китай")
+@router.message(F.text == "Заказ в Китай")
 async def handle_china_order_check(message: Message, state: FSMContext):
     """Проверяет остатки и формирует список для заказа в Китай"""
     if not await check_super_admin_access(message):
