@@ -12,6 +12,7 @@ import re
 from states import SalesStates
 from typing import Optional, Dict, List, Any, Union
 from sqlalchemy import select
+from datetime import datetime
 
 router = Router()
 
@@ -662,36 +663,106 @@ async def process_order_customer_phone(message: Message, state: FSMContext):
 
 @router.message(SalesStates.waiting_for_order_delivery_address)
 async def process_order_delivery_address(message: Message, state: FSMContext):
-    """Обработка ввода адреса доставки"""
+    """Обработка ввода адреса доставки и переход к дате отгрузки"""
     address = message.text.strip()
     
-    # Если адрес не указан, считаем самовывозом
     if address.lower() == "нет":
         address = "Самовывоз"
     
     # Сохраняем адрес доставки
     await state.update_data(delivery_address=address)
     
+    # Запрашиваем дату отгрузки
+    await message.answer(
+        "Введите дату отгрузки (формат: ДД.ММ.ГГГГ):",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="❌ Отмена")]],
+            resize_keyboard=True
+        )
+    )
+    await state.set_state(SalesStates.waiting_for_shipment_date)
+
+@router.message(SalesStates.waiting_for_shipment_date)
+async def process_shipment_date(message: Message, state: FSMContext):
+    """Обработка ввода даты отгрузки и переход к способу оплаты"""
+    if message.text == "❌ Отмена":
+        await state.clear()
+        await message.answer("Создание заказа отменено.", reply_markup=get_menu_keyboard(MenuState.SALES_MAIN))
+        return
+
+    shipment_date_str = message.text.strip()
+    try:
+        # Проверяем формат ДД.ММ.ГГГГ
+        shipment_date = datetime.strptime(shipment_date_str, "%d.%m.%Y").date()
+        await state.update_data(shipment_date=shipment_date)
+        
+        # Запрашиваем способ оплаты
+        keyboard = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="Юр. Комп.")],
+                [KeyboardButton(text="Наличные")],
+                [KeyboardButton(text="Kaspi")],
+                [KeyboardButton(text="❌ Отмена")]
+            ],
+            resize_keyboard=True
+        )
+        await message.answer("Выберите способ оплаты:", reply_markup=keyboard)
+        await state.set_state(SalesStates.waiting_for_payment_method)
+        
+    except ValueError:
+        await message.answer(
+            "❌ Неверный формат даты. Пожалуйста, введите дату в формате ДД.ММ.ГГГГ (например, 31.12.2024):",
+             reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="❌ Отмена")]],
+                resize_keyboard=True
+            )
+        )
+
+@router.message(SalesStates.waiting_for_payment_method)
+async def process_payment_method(message: Message, state: FSMContext):
+    """Обработка выбора способа оплаты и переход к подтверждению заказа"""
+    payment_method = message.text.strip()
+    allowed_methods = ["Юр. Комп.", "Наличные", "Kaspi"]
+
+    if payment_method == "❌ Отмена":
+        await state.clear()
+        await message.answer("Создание заказа отменено.", reply_markup=get_menu_keyboard(MenuState.SALES_MAIN))
+        return
+        
+    if payment_method not in allowed_methods:
+        await message.answer(
+            f"Пожалуйста, выберите способ оплаты из предложенных кнопок: {', '.join(allowed_methods)}",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[
+                    [KeyboardButton(text="Юр. Комп.")],
+                    [KeyboardButton(text="Наличные")],
+                    [KeyboardButton(text="Kaspi")],
+                    [KeyboardButton(text="❌ Отмена")]
+                ],
+                resize_keyboard=True
+            )
+        )
+        return
+        
+    await state.update_data(payment_method=payment_method)
+    
     # Показываем сводку заказа и запрашиваем подтверждение
     data = await state.get_data()
     
-    # Получаем данные о выбранных продуктах
     selected_products = data.get('selected_products', [])
-    
-    # Получаем данные о выбранных стыках
     selected_joints = data.get('selected_joints', [])
-    
-    need_joints = data.get('need_joints', False)
-    need_glue = data.get('need_glue', False)
+    need_joints = len(selected_joints) > 0 # Проверяем по факту наличия стыков в списке
     glue_quantity = data.get('glue_quantity', 0)
     installation_required = data.get('installation_required', False)
     customer_phone = data.get('customer_phone', '')
     delivery_address = data.get('delivery_address', '')
+    shipment_date = data.get('shipment_date')
+    shipment_date_str = shipment_date.strftime('%d.%m.%Y') if shipment_date else 'Не указана'
+    payment_method = data.get('payment_method', 'Не указан')
     
     # Формируем текст заказа
     order_summary = f"📝 Сводка заказа:\n\n"
     
-    # Добавляем информацию о выбранных продуктах
     if selected_products:
         order_summary += f"📦 Выбранные продукты:\n"
         total_panels = 0
@@ -702,98 +773,79 @@ async def process_order_delivery_address(message: Message, state: FSMContext):
     else:
         order_summary += "Продукты не выбраны\n\n"
     
-    # Добавляем информацию о стыках
     if need_joints and selected_joints:
         order_summary += f"🔗 Стыки:\n"
         for joint in selected_joints:
             joint_type = joint.get('type', '')
             joint_type_text = ''
-            if joint_type == 'butterfly':
-                joint_type_text = "Бабочка"
-            elif joint_type == 'simple':
-                joint_type_text = "Простые"
-            elif joint_type == 'closing':
-                joint_type_text = "Замыкающие"
-            
+            if joint_type == 'butterfly': joint_type_text = "Бабочка"
+            elif joint_type == 'simple': joint_type_text = "Простые"
+            elif joint_type == 'closing': joint_type_text = "Замыкающие"
             order_summary += f"▪️ Тип: {joint_type_text}, {joint.get('thickness', '')} мм, {joint.get('color', '')}: {joint.get('quantity', 0)} шт.\n"
         order_summary += "\n"
     else:
         order_summary += f"🔗 Стыки: Нет\n\n"
     
-    # Добавляем остальную информацию
     order_summary += f"🧴 Клей: {glue_quantity} тюбиков\n"
     order_summary += f"🔧 Монтаж: {'Требуется' if installation_required else 'Не требуется'}\n"
     order_summary += f"📞 Контактный телефон: {customer_phone}\n"
     order_summary += f"🚚 Адрес доставки: {delivery_address}\n"
+    order_summary += f"🗓 Дата отгрузки: {shipment_date_str}\n" # Новое поле
+    order_summary += f"💳 Способ оплаты: {payment_method}\n" # Новое поле
     
-    # Запрашиваем подтверждение
     await state.update_data(order_summary=order_summary)
-    await state.set_state(MenuState.SALES_ORDER_CONFIRM)
+    # Используем состояние из navigation.py для подтверждения
+    await state.set_state(MenuState.SALES_ORDER_CONFIRM) 
     
     await message.answer(
         order_summary + "\n\nПожалуйста, подтвердите заказ:",
-        reply_markup=get_menu_keyboard(MenuState.SALES_ORDER_CONFIRM)
+        reply_markup=get_menu_keyboard(MenuState.SALES_ORDER_CONFIRM) # Клавиатура с Подтвердить/Отменить/Назад
     )
-    await state.set_state(SalesStates.waiting_for_order_confirmation)
+    # Устанавливаем состояние ожидания подтверждения
+    await state.set_state(SalesStates.waiting_for_order_confirmation) 
 
 @router.message(SalesStates.waiting_for_order_confirmation)
 async def process_order_confirmation(message: Message, state: FSMContext):
-    """Обработка подтверждения заказа"""
+    """Обработка подтверждения заказа с новыми полями"""
     response = message.text.strip()
     
     if response == "✅ Подтвердить":
-        # Получаем все данные состояния
         data = await state.get_data()
-        
-        # Получаем выбранные продукты из состояния
         selected_products = data.get("selected_products", [])
-        
-        # Получаем выбранные стыки из состояния
         selected_joints = data.get("selected_joints", [])
-        
-        need_joints = len(selected_joints) > 0
-        need_glue = data.get("need_glue", False)
         customer_phone = data.get("customer_phone", "")
         delivery_address = data.get("delivery_address", "")
         installation_required = data.get("installation_required", False)
         glue_quantity = data.get("glue_quantity", 0)
-        
-        # Debug logging for glue
-        logging.info(f"DEBUG: Order confirmation - need_glue: {need_glue}, glue_quantity: {glue_quantity}")
-        
-        # Получаем telegram_id пользователя
+        shipment_date = data.get("shipment_date") # Получаем дату
+        payment_method = data.get("payment_method") # Получаем способ оплаты
         telegram_id = message.from_user.id
         
-        # Начинаем транзакцию
         db = next(get_db())
         try:
-            # Находим пользователя по telegram_id
             user = db.query(User).filter(User.telegram_id == telegram_id).first()
-            
-            # Если пользователь не найден, прерываем операцию
             if not user:
-                logging.error(f"User with telegram_id={telegram_id} not found in database during order confirmation.")
-                await message.answer(
-                    "❌ Ошибка: Ваш пользователь не найден в системе. Пожалуйста, выполните команду /start и попробуйте снова.",
-                    reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
-                )
-                await state.set_state(MenuState.SALES_MAIN) # Сбрасываем состояние
+                logging.error(f"User with telegram_id={telegram_id} not found.")
+                await message.answer("❌ Ошибка: Ваш пользователь не найден.", reply_markup=get_menu_keyboard(MenuState.SALES_MAIN))
+                await state.clear()
                 return
             
-            # Используем user.id для создания заказа
             manager_db_id = user.id
             
-            # Создаем заказ
+            # Создаем заказ с новыми полями
             order = Order(
-                manager_id=manager_db_id, # Используем ID пользователя из базы
+                manager_id=manager_db_id,
                 customer_phone=customer_phone,
                 delivery_address=delivery_address,
                 installation_required=installation_required,
+                shipment_date=shipment_date, 
+                payment_method=payment_method,
                 status=OrderStatus.NEW
             )
             db.add(order)
             db.flush()
             
+            # ... (логика добавления продуктов, стыков, клея остается прежней) ...
             # Добавляем продукты в заказ
             total_panels = 0
             for product in selected_products:
@@ -820,19 +872,6 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                         color=product['film_code'],
                         thickness=product['thickness']
                     )
-                    
-                    # Уменьшаем количество готовой продукции на складе
-                    # finished_product.quantity -= qty
-                    
-                    # Создаем операцию для готовой продукции
-                    # operation = Operation(
-                    #     operation_type=OperationType.READY_PRODUCT_OUT.value,
-                    #     quantity=qty,
-                    #     user_id=manager_db_id, # Используем ID из базы
-                    #     details=json.dumps({"film_id": film.id, "film_code": film_code, "thickness": thickness})
-                    # )
-                    # db.add(operation)
-                    
                     db.add(order_item)
                 else:
                     # Если нет готовой продукции, создаем заказ на производство
@@ -851,13 +890,13 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                         panel_quantity=qty,
                         status="new"
                     )
-                    
                     db.add(production_order)
                 
                 db.add(order_item)
             
             # Если нужны стыки, добавляем их в заказ
             total_joints = 0
+            need_joints = len(selected_joints) > 0
             if need_joints and selected_joints:
                 for joint in selected_joints:
                     joint_type_val = joint.get('type')
@@ -867,143 +906,90 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                     
                     # Преобразуем строковое значение типа стыка обратно в enum
                     joint_type_enum = None
-                    if joint_type_val == "butterfly":
-                        joint_type_enum = JointType.BUTTERFLY
-                    elif joint_type_val == "simple":
-                        joint_type_enum = JointType.SIMPLE
-                    elif joint_type_val == "closing":
-                        joint_type_enum = JointType.CLOSING
+                    if joint_type_val == "butterfly": joint_type_enum = JointType.BUTTERFLY
+                    elif joint_type_val == "simple": joint_type_enum = JointType.SIMPLE
+                    elif joint_type_val == "closing": joint_type_enum = JointType.CLOSING
                         
-                    if not joint_type_enum:
-                        continue
+                    if not joint_type_enum: continue
                         
                     # Находим соответствующий стык в базе
-                    joint = db.query(Joint).filter(
+                    joint_db = db.query(Joint).filter(
                         Joint.type == joint_type_enum,
                         Joint.thickness == thickness,
                         Joint.color == color
                     ).first()
                     
-                    if joint and joint.quantity >= joint_qty:
+                    if joint_db and joint_db.quantity >= joint_qty:
                         # Создаем связь между заказом и стыком
                         order_joint = OrderJoint(
                             order_id=order.id,
                             joint_type=joint_type_enum,
                             joint_color=color,
-                            quantity=joint_qty,
-                            joint_thickness=thickness  # Добавляем параметр joint_thickness
+                            joint_quantity=joint_qty, # Используем правильное имя поля
+                            joint_thickness=thickness
                         )
                         db.add(order_joint)
-                        
-                        # Уменьшаем количество стыков на складе
-                        # joint.quantity -= joint_qty
-                        
-                        # Создаем операцию
-                        # operation = Operation(
-                        #     operation_type=OperationType.JOINT_OUT.value,
-                        #     quantity=joint_qty,
-                        #     user_id=manager_db_id
-                        # )
-                        # db.add(operation)
             
             # Если указано количество клея, добавляем в заказ
-            glue_quantity = data.get('glue_quantity', 0)
-            logging.info(f"DEBUG: Order confirmation - need_glue: {data.get('need_glue', False)}, glue_quantity: {glue_quantity}")
-            
-            if glue_quantity > 0:  # Было: if need_glue and glue_quantity > 0:
-                # Получаем объект клея
+            if glue_quantity > 0:
                 glue = db.query(Glue).first()
-                logging.info(f"DEBUG: Checking for glue - found: {glue is not None}, glue_quantity needed: {glue_quantity}")
-                
                 if glue and glue.quantity >= glue_quantity:
-                    # Связываем заказ с клеем
                     order_glue = OrderGlue(
                         order_id=order.id,
                         quantity=glue_quantity
                     )
                     db.add(order_glue)
-                    logging.info(f"DEBUG: Created OrderGlue with quantity {glue_quantity} for order {order.id}")
-                    
-                    # Уменьшаем количество клея на складе
-                    # glue.quantity -= glue_quantity
-                    
-                    # Создаем операцию
-                    # operation = Operation(
-                    #     operation_type=OperationType.GLUE_OUT.value,
-                    #     quantity=glue_quantity,
-                    #     user_id=manager_db_id
-                    # )
-                    # db.add(operation)
-                else:
-                    logging.warning(f"DEBUG: Not enough glue - required: {glue_quantity}, available: {glue.quantity if glue else 0}")
             
-            # Сохраняем изменения в базе данных
             db.commit()
             
-            # Формируем информацию о продуктах в заказе
-            products_info = "Продукция:\n"
-            for product in selected_products:
-                products_info += f"▪️ {product['film_code']} (толщина {product['thickness']} мм): {product['quantity']} шт.\n"
-            
-            # Формируем информацию о стыках в заказе
+            # Формируем итоговое сообщение с новыми полями
+            products_info = "Продукция:\n" + "\n".join([f"▪️ {p['film_code']} ({p['thickness']} мм): {p['quantity']} шт." for p in selected_products]) if selected_products else ""
             joints_info = ""
             if need_joints and selected_joints:
-                joints_info = "\nСтыки:\n"
-                for joint in selected_joints:
-                    joint_type_val = joint.get('type')
-                    thickness = joint.get('thickness')
-                    color = joint.get('color')
-                    quantity = joint.get('quantity')
-                    
-                    joint_type_text = ""
-                    if joint_type_val == "butterfly":
-                        joint_type_text = "Бабочка"
-                    elif joint_type_val == "simple":
-                        joint_type_text = "Простые"
-                    elif joint_type_val == "closing":
-                        joint_type_text = "Замыкающие"
-                    
-                    joints_info += f"▪️ Тип: {joint_type_text}, {thickness} мм, {color}: {quantity} шт.\n"
+                joints_info = "\nСтыки:\n" + "\n".join([f"▪️ Тип: {j.get('type', '')}, {j.get('thickness', '')} мм, {j.get('color', '')}: {j.get('quantity', 0)} шт." for j in selected_joints])
             
-            # Формируем итоговое сообщение
-            confirmation_message = f"✅ Заказ #{order.id} успешно создан!\n\n"
-            confirmation_message += products_info
+            shipment_date_str = shipment_date.strftime('%d.%m.%Y') if shipment_date else 'Не указана'
             
-            if joints_info:
-                confirmation_message += joints_info
-                
-            confirmation_message += f"\n🧴 Клей: {glue_quantity} тюбиков"
-            confirmation_message += f"\n🔧 Монтаж: {'Требуется' if installation_required else 'Не требуется'}"
-            confirmation_message += f"\n📞 Контактный телефон: {customer_phone}"
-            confirmation_message += f"\n🚚 Адрес доставки: {delivery_address}"
-            
-            # Сбрасываем состояние и отправляем подтверждение
-            await state.set_state(MenuState.SALES_MAIN)
-            await message.answer(
-                confirmation_message,
-                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+            confirmation_message = (
+                f"✅ Заказ #{order.id} успешно создан!\n\n"
+                f"{products_info}\n"
+                f"{joints_info}\n"
+                f"\n🧴 Клей: {glue_quantity} тюбиков\n"
+                f"🔧 Монтаж: {'Требуется' if installation_required else 'Не требуется'}\n"
+                f"📞 Контактный телефон: {customer_phone}\n"
+                f"🚚 Адрес доставки: {delivery_address}\n"
+                f"🗓 Дата отгрузки: {shipment_date_str}\n"
+                f"💳 Способ оплаты: {payment_method}\n"
             )
+            
+            await state.clear() # Очищаем состояние после успешного создания
+            await message.answer(confirmation_message, reply_markup=get_menu_keyboard(MenuState.SALES_MAIN))
         except Exception as e:
             db.rollback()
-            logging.error(f"Error creating order: {e}")
-            await message.answer(
-                f"❌ Произошла ошибка при создании заказа: {e}",
-                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
-            )
+            logging.error(f"Error creating order: {e}", exc_info=True)
+            await message.answer(f"❌ Произошла ошибка при создании заказа: {e}", reply_markup=get_menu_keyboard(MenuState.SALES_MAIN))
+            await state.clear() # Очищаем состояние при ошибке
         finally:
             db.close()
+            
     elif response == "❌ Отменить":
-        # Отменяем заказ
-        await state.set_state(MenuState.SALES_MAIN)
-        await message.answer(
-            "Заказ отменен.",
-            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+        await state.clear()
+        await message.answer("Заказ отменен.", reply_markup=get_menu_keyboard(MenuState.SALES_MAIN))
+    elif response == "◀️ Назад":
+         # Возвращаемся к вводу способа оплаты
+        keyboard = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="Юр. Комп.")],
+                [KeyboardButton(text="Наличные")],
+                [KeyboardButton(text="Kaspi")],
+                [KeyboardButton(text="❌ Отмена")] # Добавляем кнопку Отмена
+            ],
+            resize_keyboard=True
         )
+        await message.answer("Выберите способ оплаты:", reply_markup=keyboard)
+        await state.set_state(SalesStates.waiting_for_payment_method)
     else:
-        await message.answer(
-            "Пожалуйста, выберите один из вариантов: ✅ Подтвердить или ❌ Отменить",
-            reply_markup=get_menu_keyboard(MenuState.SALES_ORDER_CONFIRM)
-        )
+        await message.answer("Пожалуйста, выберите один из вариантов: ✅ Подтвердить, ❌ Отменить или ◀️ Назад", reply_markup=get_menu_keyboard(MenuState.SALES_ORDER_CONFIRM))
 
 @router.message(F.text == "🔙 Назад в админку")
 async def handle_back_to_admin(message: Message, state: FSMContext):

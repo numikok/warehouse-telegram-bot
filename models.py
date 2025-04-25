@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Enum as SQLEnum, BigInteger, Boolean
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Enum as SQLEnum, BigInteger, Boolean, Date
 from sqlalchemy.orm import relationship
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
@@ -183,6 +183,8 @@ class Order(Base):
     installation_required = Column(Boolean, default=False)
     customer_phone = Column(String, nullable=True)
     delivery_address = Column(String, nullable=True)
+    shipment_date = Column(Date, nullable=True)
+    payment_method = Column(String, nullable=True)
     status = Column(SQLEnum(OrderStatus), nullable=False, default=OrderStatus.NEW)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -232,6 +234,8 @@ class Order(Base):
             "installation_required": self.installation_required,
             "customer_phone": self.customer_phone,
             "delivery_address": self.delivery_address,
+            "shipment_date": self.shipment_date.isoformat() if self.shipment_date else None,
+            "payment_method": self.payment_method,
             "status": self.status.value,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None
@@ -279,6 +283,8 @@ class CompletedOrder(Base):
     installation_required = Column(Boolean, default=False)
     customer_phone = Column(String, nullable=False)
     delivery_address = Column(String, nullable=False)
+    shipment_date = Column(Date, nullable=True)
+    payment_method = Column(String, nullable=True)
     completed_at = Column(DateTime(timezone=True), server_default=func.now())
     
     manager = relationship("User", foreign_keys=[manager_id])
@@ -300,5 +306,7 @@ class CompletedOrder(Base):
             "installation_required": self.installation_required,
             "customer_phone": self.customer_phone,
             "delivery_address": self.delivery_address,
+            "shipment_date": self.shipment_date.isoformat() if self.shipment_date else None,
+            "payment_method": self.payment_method,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None
         } 

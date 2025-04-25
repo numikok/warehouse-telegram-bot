@@ -547,6 +547,11 @@ async def handle_my_orders(message: Message, state: FSMContext):
             response += f"Статус: {order.status.value}\n"
             response += f"Клиент: {order.customer_phone}\n"
             response += f"Адрес: {order.delivery_address}\n"
+            # Добавляем дату отгрузки и способ оплаты
+            shipment_date_str = order.shipment_date.strftime('%d.%m.%Y') if order.shipment_date else 'Не указана'
+            payment_method_str = order.payment_method if order.payment_method else 'Не указан'
+            response += f"🗓 Дата отгрузки: {shipment_date_str}\n"
+            response += f"💳 Способ оплаты: {payment_method_str}\n"
             response += f"Монтаж: {'Да' if order.installation_required else 'Нет'}\n"
             
             response += "\nПродукция:\n"
@@ -685,7 +690,7 @@ async def confirm_shipment(message: Message, state: FSMContext):
             glue = db.query(Glue).first()
             glue.quantity -= glue_item.quantity
             
-        # Создаем запись в completed_orders
+        # Создаем запись в completed_orders, копируя новые поля
         completed_order = CompletedOrder(
             order_id=order.id,
             manager_id=order.manager_id,
@@ -693,6 +698,8 @@ async def confirm_shipment(message: Message, state: FSMContext):
             installation_required=order.installation_required,
             customer_phone=order.customer_phone,
             delivery_address=order.delivery_address,
+            shipment_date=order.shipment_date, # Копируем дату отгрузки
+            payment_method=order.payment_method, # Копируем способ оплаты
             completed_at=datetime.utcnow()
         )
         db.add(completed_order)
@@ -777,6 +784,11 @@ async def handle_completed_orders(message: Message, state: FSMContext):
             response += f"Дата завершения: {order.completed_at.strftime('%Y-%m-%d %H:%M')}\n"
             response += f"Клиент: {order.customer_phone}\n"
             response += f"Адрес: {order.delivery_address}\n"
+            # Добавляем дату отгрузки и способ оплаты
+            shipment_date_str = order.shipment_date.strftime('%d.%m.%Y') if order.shipment_date else 'Не указана'
+            payment_method_str = order.payment_method if order.payment_method else 'Не указан'
+            response += f"🗓 Дата отгрузки: {shipment_date_str}\n"
+            response += f"💳 Способ оплаты: {payment_method_str}\n"
             response += f"Монтаж: {'Да' if order.installation_required else 'Нет'}\n"
             response += f"Менеджер: {order.manager.username if order.manager else 'N/A'}\n"
             response += f"Склад: {order.warehouse_user.username if order.warehouse_user else 'N/A'}\n"

@@ -48,6 +48,16 @@ class ProductionStates(StatesGroup):
     waiting_for_roll_count = State()
     waiting_for_roll_length = State()
     
+    waiting_for_panel_thickness_income = State()
+    waiting_for_panel_quantity_income = State()
+    waiting_for_production_film_code = State()
+    waiting_for_production_panel_quantity = State()
+    waiting_for_defect_material = State()
+    waiting_for_defect_film_code = State()
+    waiting_for_defect_joint_details = State()
+    waiting_for_defect_quantity = State()
+    confirming_production_order_completion = State()
+    
 class ProductionOrderStates(StatesGroup):
     waiting_for_panel_thickness = State()
     waiting_for_panel_quantity = State()
@@ -63,6 +73,7 @@ class WarehouseStates(StatesGroup):
     waiting_for_panel_thickness = State()
     waiting_for_panel_quantity = State()
     waiting_for_glue_quantity = State()
+    confirming_shipment = State()
     
 class SalesStates(StatesGroup):
     # Базовые состояния для работы с пленкой
@@ -121,4 +132,19 @@ class SalesStates(StatesGroup):
     waiting_for_order_delivery_address = State()
     waiting_for_order_confirmation = State()
     waiting_for_order_film_color = State()
-    waiting_for_order_panel_quantity = State() 
+    waiting_for_order_panel_quantity = State()
+    
+    waiting_for_shipment_date = State()
+    waiting_for_payment_method = State()
+    
+class AdminStates(StatesGroup):
+    waiting_for_user_id = State()
+    waiting_for_role = State()
+    waiting_for_report_type = State()
+    waiting_for_delete_confirmation = State()
+    waiting_for_user_to_delete = State()
+
+class SuperAdminStates(StatesGroup):
+    waiting_for_user_to_reset = State()
+    waiting_for_target_user_id = State()
+    waiting_for_role = State() 
