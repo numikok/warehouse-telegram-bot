@@ -149,193 +149,89 @@ async def cmd_confirm_order(message: Message, state: FSMContext):
     if not await check_warehouse_access(message):
         return
         
-    await display_active_orders(message)
+    await display_active_orders(message, state)
 
-async def display_active_orders(message: Message):
+async def display_active_orders(message: Message, state: FSMContext):
     """Отображает список активных заказов для подтверждения отгрузки"""
     db = next(get_db())
     try:
-        # Получаем все активные заказы со статусом NEW
-        orders = db.query(Order).filter(Order.status == OrderStatus.NEW).all()
-        
-        if not orders:
+        # Получаем все активные заказы со статусом NEW или IN_PROGRESS (из handle_my_orders)
+        orders_to_ship = db.query(Order).filter(
+            Order.status.in_([OrderStatus.NEW, OrderStatus.IN_PROGRESS])
+        ).options(
+            joinedload(Order.products),
+            joinedload(Order.joints),
+            joinedload(Order.glues),
+            joinedload(Order.manager) # Load manager
+        ).order_by(Order.created_at).all() # Added order_by
+
+        if not orders_to_ship:
             await message.answer(
                 "📦 Нет активных заказов для отгрузки.",
+                # Используем главное меню склада, а не меню заказов, т.к. заказов нет
                 reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_MAIN)
             )
             return
-            
-        # Формируем сообщение со списком заказов
-        response = "📦 Активные заказы для отгрузки:\n\n"
-        
-        for order in orders:
-            # Получаем имя менеджера
-            manager = db.query(User).filter(User.id == order.manager_id).first()
-            manager_name = manager.username if manager else "Неизвестный менеджер"
-            
-            # Формируем информацию о продуктах
-            products_info = ""
-            if hasattr(order, 'products') and order.products:
-                products_info = "🎨 Продукция:\n"
-                for product in order.products:
-                    try:
-                        # Извлекаем всю доступную информацию о продукте
-                        product_desc = []
-                        
-                        # Проверяем каждый атрибут, используя безопасные методы доступа
-                        color = getattr(product, 'color', "Не указан")
-                        if color:
-                            product_desc.append(f"цвет: {color}")
-                            
-                        thickness = getattr(product, 'thickness', None)
-                        if thickness is not None:
-                            product_desc.append(f"толщина: {thickness} мм")
-                            
-                        quantity = getattr(product, 'quantity', None)
-                        if quantity is not None:
-                            product_desc.append(f"кол-во: {quantity} шт")
-                        
-                        if product_desc:
-                            products_info += f"  • {', '.join(product_desc)}\n"
-                        else:
-                            products_info += "  • Продукция (данные недоступны)\n"
-                    except Exception as e:
-                        logging.error(f"Error displaying product: {str(e)}")
-                        products_info += "  • Продукция (ошибка чтения данных)\n"
+
+        response = "📦 Активные заказы для отгрузки:\\n\\n"
+        keyboard_buttons = [] # For reply keyboard buttons
+        for order in orders_to_ship:
+            response += f"---\\n"
+            response += f"📝 Заказ #{order.id}\\n"
+            # Используем order.manager т.к. загрузили его через joinedload
+            response += f"👤 Менеджер: {order.manager.username if order.manager else 'Неизвестно'}\\n"
+            response += f"Статус: {order.status.value}\\n" # Added Status
+            response += f"Клиент: {order.customer_phone}\\n" # Renamed from Телефон
+            response += f"Адрес: {order.delivery_address}\\n" # Renamed from Адрес
+            # Добавляем дату отгрузки и способ оплаты
+            shipment_date_str = order.shipment_date.strftime('%d.%m.%Y') if order.shipment_date else 'Не указана'
+            payment_method_str = order.payment_method if order.payment_method else 'Не указан'
+            response += f"🗓 Дата отгрузки: {shipment_date_str}\\n"
+            response += f"💳 Способ оплаты: {payment_method_str}\\n"
+            response += f"🔧 Монтаж: {'Да' if order.installation_required else 'Нет'}\\n"
+
+            # Продукция
+            response += "\\n🎨 Продукция:\\n" # Changed title
+            if order.products:
+                 for item in order.products:
+                     # Changed formatting slightly to match handle_my_orders
+                     response += f"- {item.color} ({item.thickness} мм): {item.quantity} шт.\\n"
             else:
-                # Для поддержки старой структуры
-                try:
-                    if hasattr(order, 'film_code') and order.film_code:
-                        products_info = "🎨 Продукция:\n"
-                        
-                        # Собираем информацию о продукте из старой структуры
-                        product_desc = []
-                        
-                        if order.film_code:
-                            product_desc.append(f"цвет: {order.film_code}")
-                            
-                        if hasattr(order, 'panel_thickness'):
-                            product_desc.append(f"толщина: {order.panel_thickness} мм")
-                            
-                        if hasattr(order, 'panel_quantity'):
-                            product_desc.append(f"кол-во: {order.panel_quantity} шт")
-                            
-                        if product_desc:
-                            products_info += f"  • {', '.join(product_desc)}\n"
-                        else:
-                            products_info += "  • Продукция (данные недоступны)\n"
-                except Exception as e:
-                    logging.error(f"Ошибка при отображении продукта из старой структуры: {str(e)}")
-                    products_info += "  • Продукция (ошибка чтения данных)\n"
-            
-            # Формируем информацию о стыках
-            joints_info = ""
-            if hasattr(order, 'joints') and order.joints:
-                joints_info = "🔗 Стыки:\n"
-                for joint in order.joints:
-                    try:
-                        # Извлекаем всю доступную информацию о стыке
-                        joint_desc = []
-                        
-                        # Тип стыка
-                        joint_type_text = "Не указан"
-                        if hasattr(joint, 'joint_type'):
-                            try:
-                                if joint.joint_type == JointType.BUTTERFLY:
-                                    joint_type_text = "Бабочка"
-                                elif joint.joint_type == JointType.SIMPLE:
-                                    joint_type_text = "Простые"
-                                elif joint.joint_type == JointType.CLOSING:
-                                    joint_type_text = "Замыкающие"
-                                else:
-                                    joint_type_text = str(joint.joint_type)
-                                joint_desc.append(joint_type_text)
-                            except Exception as e:
-                                logging.error(f"Error processing joint type: {str(e)}")
-                                joint_desc.append("тип: Не удалось определить")
-                        
-                        # Цвет стыка
-                        joint_color = getattr(joint, 'joint_color', None)
-                        if joint_color:
-                            joint_desc.append(f"цвет: {joint_color}")
-                            
-                        # Толщина стыка
-                        thickness = getattr(joint, 'joint_thickness', None)
-                        if thickness is not None:
-                            joint_desc.append(f"толщина: {thickness} мм")
-                            
-                        # Количество стыков
-                        quantity = getattr(joint, 'quantity', None)
-                        if quantity is None:
-                            quantity = getattr(joint, 'joint_quantity', 0)
-                        if quantity:
-                            joint_desc.append(f"кол-во: {quantity} шт")
-                        
-                        if joint_desc:
-                            joints_info += f"  • {', '.join(joint_desc)}\n"
-                        else:
-                            joints_info += "  • Стык (данные недоступны)\n"
-                    except Exception as e:
-                        logging.error(f"Error displaying joint: {str(e)}")
-                        joints_info += "  • Стык (ошибка чтения данных)\n"
+                 response += "- нет\\n" # Changed from "  • нет\n"
+
+            # Стыки
+            response += "\\n🔗 Стыки:\\n" # Changed title
+            if order.joints:
+                 for joint in order.joints:
+                     joint_type_str = joint.joint_type.name.capitalize() if joint.joint_type else "Неизвестно"
+                     # Changed formatting slightly
+                     response += f"- {joint_type_str} ({joint.joint_thickness} мм, {joint.joint_color}): {joint.joint_quantity} шт.\\n"
             else:
-                # Пытаемся использовать устаревшие свойства, если они есть
-                try:
-                    if hasattr(order, 'joint_quantity') and order.joint_quantity and order.joint_quantity > 0:
-                        joint_type_text = "Не указан"
-                        try:
-                            if hasattr(order, 'joint_type'):
-                                if order.joint_type == JointType.BUTTERFLY:
-                                    joint_type_text = "Бабочка"
-                                elif order.joint_type == JointType.SIMPLE:
-                                    joint_type_text = "Простые"
-                                elif order.joint_type == JointType.CLOSING:
-                                    joint_type_text = "Замыкающие"
-                        except:
-                            pass
-                            
-                        joint_color = "Не указан"
-                        try:
-                            if hasattr(order, 'joint_color'):
-                                joint_color = order.joint_color
-                        except:
-                            pass
-                            
-                        joints_info = f"🔗 Стыки: {joint_type_text}, {joint_color}: {order.joint_quantity} шт.\n"
-                    else:
-                        joints_info = "🔗 Стыки: Нет\n"
-                except:
-                    joints_info = "🔗 Стыки: Нет\n"
-            
-            # Получаем информацию о количестве клея
-            glue_quantity = 0
-            if hasattr(order, 'glues') and order.glues:
-                try:
-                    glue_quantity = sum(getattr(glue, 'quantity', 0) for glue in order.glues)
-                except Exception as e:
-                    logging.error(f"Ошибка при извлечении данных о клее: {str(e)}")
+                 response += "- нет\\n"
+
+            # Клей
+            response += "\\n🧴 Клей:\\n" # Changed title
+            glue_total = sum(g.quantity for g in order.glues) if order.glues else 0
+            if glue_total > 0:
+                response += f"- {glue_total} шт.\\n" # Show quantity only if > 0
             else:
-                # Если нет glues, пробуем получить атрибуты напрямую из заказа (старая структура)
-                glue_quantity = getattr(order, 'glue_quantity', 0)
-                
-            response += (
-                f"📝 Заказ #{order.id}\n"
-                f"📆 Дата: {order.created_at.strftime('%d.%m.%Y %H:%M')}\n"
-                f"👤 Менеджер: {manager_name}\n"
-                f"{products_info}"
-                f"{joints_info}"
-                f"🧴 Клей: {glue_quantity} шт.\n"
-                f"🔧 Монтаж: {'Требуется' if order.installation_required else 'Не требуется'}\n"
-                f"📞 Телефон: {order.customer_phone}\n"
-                f"🚚 Адрес: {order.delivery_address}\n"
-                f"-----\n"
-                f"✅ Для подтверждения отгрузки заказа #{order.id} отправьте:\n/confirm_{order.id}\n\n"
-            )
-        
-        await message.answer(
-            response,
-            reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_ORDERS)
+                 response += "- нет\\n"
+
+            response += f"\\n" # Add newline before button
+            # Добавляем кнопку для подтверждения отгрузки
+            keyboard_buttons.append([KeyboardButton(text=f"✅ Отгрузить заказ #{order.id}")])
+
+        # Добавляем кнопку "Назад"
+        keyboard_buttons.append([KeyboardButton(text="◀️ Назад")])
+
+        reply_markup = ReplyKeyboardMarkup(
+            keyboard=keyboard_buttons,
+            resize_keyboard=True
         )
+
+        await message.answer(response, reply_markup=reply_markup)
+        await state.set_state(WarehouseStates.confirming_shipment) # Set state for button handler
+
     finally:
         db.close()
 
@@ -345,8 +241,8 @@ async def handle_orders(message: Message, state: FSMContext):
     if not await check_warehouse_access(message):
         return
     
-    # Вызываем функцию для отображения активных заказов
-    await display_active_orders(message)
+    # Вызываем функцию для отображения активных заказов, передаем state
+    await display_active_orders(message, state) # Pass state
 
 @router.message(F.text == "📦 Остатки")
 async def handle_stock(message: Message, state: FSMContext):
@@ -512,84 +408,6 @@ async def handle_glue(message: Message, state: FSMContext):
             response += "Нет в наличии\n"
         keyboard = get_menu_keyboard(MenuState.INVENTORY_GLUE)
         await message.answer(response, reply_markup=keyboard)
-    finally:
-        db.close()
-
-@router.message(F.text == "📦 Мои заказы")
-async def handle_my_orders(message: Message, state: FSMContext):
-    if not await check_warehouse_access(message):
-        return
-    
-    await state.set_state(MenuState.WAREHOUSE_ORDERS)
-    db = next(get_db())
-    try:
-        # Получаем заказы со статусом NEW или IN_PROGRESS
-        orders_to_ship = db.query(Order).filter(
-            Order.status.in_([OrderStatus.NEW, OrderStatus.IN_PROGRESS])
-        ).options(
-            joinedload(Order.products),
-            joinedload(Order.joints),
-            joinedload(Order.glues)
-        ).order_by(Order.created_at).all()
-        
-        if not orders_to_ship:
-            await message.answer(
-                "Нет активных заказов для отгрузки.",
-                reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_MAIN)
-            )
-            return
-        
-        response = "📦 Активные заказы для отгрузки:\n\n"
-        keyboard_buttons = []
-        for order in orders_to_ship:
-            response += f"---\n"
-            response += f"Заказ #{order.id}\n"
-            response += f"Статус: {order.status.value}\n"
-            response += f"Клиент: {order.customer_phone}\n"
-            response += f"Адрес: {order.delivery_address}\n"
-            # Добавляем дату отгрузки и способ оплаты
-            shipment_date_str = order.shipment_date.strftime('%d.%m.%Y') if order.shipment_date else 'Не указана'
-            payment_method_str = order.payment_method if order.payment_method else 'Не указан'
-            response += f"🗓 Дата отгрузки: {shipment_date_str}\n"
-            response += f"💳 Способ оплаты: {payment_method_str}\n"
-            response += f"Монтаж: {'Да' if order.installation_required else 'Нет'}\n"
-            
-            response += "\nПродукция:\n"
-            if order.products:
-                for item in order.products:
-                    response += f"- {item.color} ({item.thickness} мм): {item.quantity} шт.\n"
-            else:
-                response += "- нет\n"
-            
-            response += "\nСтыки:\n"
-            if order.joints:
-                for joint in order.joints:
-                    response += f"- {joint.joint_type.name.capitalize()} ({joint.joint_thickness} мм, {joint.joint_color}): {joint.joint_quantity} шт.\n"
-            else:
-                response += "- нет\n"
-                
-            response += "\nКлей:\n"
-            if order.glues:
-                for glue_item in order.glues:
-                    response += f"- {glue_item.quantity} шт.\n"
-            else:
-                response += "- нет\n"
-                
-            response += f"\n"
-            # Добавляем кнопку для подтверждения отгрузки
-            keyboard_buttons.append([KeyboardButton(text=f"✅ Отгрузить заказ #{order.id}")])
-            
-        # Добавляем кнопку "Назад"
-        keyboard_buttons.append([KeyboardButton(text="◀️ Назад")])
-        
-        reply_markup = ReplyKeyboardMarkup(
-            keyboard=keyboard_buttons,
-            resize_keyboard=True
-        )
-        
-        await message.answer(response, reply_markup=reply_markup)
-        await state.set_state(WarehouseStates.confirming_shipment)
-        
     finally:
         db.close()
 
