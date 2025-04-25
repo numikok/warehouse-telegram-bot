@@ -173,51 +173,51 @@ async def display_active_orders(message: Message, state: FSMContext):
             )
             return
 
-        response = "📦 Активные заказы для отгрузки:\\n\\n"
+        response = "📦 Активные заказы для отгрузки:\n\n"
         keyboard_buttons = [] # For reply keyboard buttons
         for order in orders_to_ship:
-            response += f"---\\n"
-            response += f"📝 Заказ #{order.id}\\n"
+            response += f"---\n"
+            response += f"📝 Заказ #{order.id}\n"
             # Используем order.manager т.к. загрузили его через joinedload
-            response += f"👤 Менеджер: {order.manager.username if order.manager else 'Неизвестно'}\\n"
-            response += f"Статус: {order.status.value}\\n" # Added Status
-            response += f"Клиент: {order.customer_phone}\\n" # Renamed from Телефон
-            response += f"Адрес: {order.delivery_address}\\n" # Renamed from Адрес
+            response += f"👤 Менеджер: {order.manager.username if order.manager else 'Неизвестно'}\n"
+            response += f"Статус: {order.status.value}\n"
+            response += f"Клиент: {order.customer_phone}\n"
+            response += f"Адрес: {order.delivery_address}\n"
             # Добавляем дату отгрузки и способ оплаты
             shipment_date_str = order.shipment_date.strftime('%d.%m.%Y') if order.shipment_date else 'Не указана'
             payment_method_str = order.payment_method if order.payment_method else 'Не указан'
-            response += f"🗓 Дата отгрузки: {shipment_date_str}\\n"
-            response += f"💳 Способ оплаты: {payment_method_str}\\n"
-            response += f"🔧 Монтаж: {'Да' if order.installation_required else 'Нет'}\\n"
+            response += f"🗓 Дата отгрузки: {shipment_date_str}\n"
+            response += f"💳 Способ оплаты: {payment_method_str}\n"
+            response += f"🔧 Монтаж: {'Да' if order.installation_required else 'Нет'}\n"
 
             # Продукция
-            response += "\\n🎨 Продукция:\\n" # Changed title
+            response += "\n🎨 Продукция:\n"
             if order.products:
                  for item in order.products:
                      # Changed formatting slightly to match handle_my_orders
-                     response += f"- {item.color} ({item.thickness} мм): {item.quantity} шт.\\n"
+                     response += f"- {item.color} ({item.thickness} мм): {item.quantity} шт.\n"
             else:
-                 response += "- нет\\n" # Changed from "  • нет\n"
+                 response += "- нет\n"
 
             # Стыки
-            response += "\\n🔗 Стыки:\\n" # Changed title
+            response += "\n🔗 Стыки:\n"
             if order.joints:
                  for joint in order.joints:
                      joint_type_str = joint.joint_type.name.capitalize() if joint.joint_type else "Неизвестно"
                      # Changed formatting slightly
-                     response += f"- {joint_type_str} ({joint.joint_thickness} мм, {joint.joint_color}): {joint.joint_quantity} шт.\\n"
+                     response += f"- {joint_type_str} ({joint.joint_thickness} мм, {joint.joint_color}): {joint.joint_quantity} шт.\n"
             else:
-                 response += "- нет\\n"
+                 response += "- нет\n"
 
             # Клей
-            response += "\\n🧴 Клей:\\n" # Changed title
+            response += "\n🧴 Клей:\n"
             glue_total = sum(g.quantity for g in order.glues) if order.glues else 0
             if glue_total > 0:
-                response += f"- {glue_total} шт.\\n" # Show quantity only if > 0
+                response += f"- {glue_total} шт.\n"
             else:
-                 response += "- нет\\n"
+                 response += "- нет\n"
 
-            response += f"\\n" # Add newline before button
+            response += f"\n"
             # Добавляем кнопку для подтверждения отгрузки
             keyboard_buttons.append([KeyboardButton(text=f"✅ Отгрузить заказ #{order.id}")])
 
