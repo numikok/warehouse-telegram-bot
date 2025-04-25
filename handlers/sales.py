@@ -1642,7 +1642,7 @@ async def process_order_more_joints(message: Message, state: FSMContext):
             )
         )
 
-@router.message(F.text == "📝 Заказать производство")
+@router.message(F.text == "📝 Заказать")
 async def handle_production_order(message: Message, state: FSMContext):
     if not await check_sales_access(message):
         return
