@@ -694,6 +694,19 @@ async def process_shipment_date(message: Message, state: FSMContext):
     try:
         # Проверяем формат ДД.ММ.ГГГГ
         shipment_date = datetime.strptime(shipment_date_str, "%d.%m.%Y").date()
+        
+        # Проверка, что дата не в прошлом
+        today = datetime.now().date()
+        if shipment_date < today:
+            await message.answer(
+                "❌ Дата отгрузки не может быть в прошлом. Пожалуйста, введите сегодняшнюю или будущую дату (ДД.ММ.ГГГГ):",
+                reply_markup=ReplyKeyboardMarkup(
+                    keyboard=[[KeyboardButton(text="❌ Отмена")]],
+                    resize_keyboard=True
+                )
+            )
+            return # Остаемся в том же состоянии, чтобы пользователь ввел дату снова
+            
         await state.update_data(shipment_date=shipment_date)
         
         # Запрашиваем способ оплаты
