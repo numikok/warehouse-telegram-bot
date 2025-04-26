@@ -27,8 +27,18 @@ completed_order_status = postgresql.ENUM(CompletedOrderStatus, name='completedor
 def upgrade() -> None:
     # Create the ENUM type in PostgreSQL if it doesn't exist
     completed_order_status.create(op.get_bind(), checkfirst=True)
-    # Add the status column to completed_orders
-    op.add_column('completed_orders', sa.Column('status', completed_order_status, nullable=False, server_default=CompletedOrderStatus.COMPLETED.value))
+    
+    # Add the status column, initially allowing NULLs
+    op.add_column('completed_orders', sa.Column('status', completed_order_status, nullable=True))
+    
+    # Update existing rows to the default status
+    op.execute(f"UPDATE completed_orders SET status = '{CompletedOrderStatus.COMPLETED.value}'")
+    
+    # Now make the column NOT NULL
+    op.alter_column('completed_orders', 'status', nullable=False)
+    
+    # Set the server default for new rows (PostgreSQL specific)
+    op.alter_column('completed_orders', 'status', server_default=CompletedOrderStatus.COMPLETED.value)
 
 
 def downgrade() -> None:
