@@ -31,14 +31,14 @@ def upgrade() -> None:
     # Add the status column, initially allowing NULLs
     op.add_column('completed_orders', sa.Column('status', completed_order_status, nullable=True))
     
-    # Update existing rows to the default status
-    op.execute(f"UPDATE completed_orders SET status = '{CompletedOrderStatus.COMPLETED.value}'")
+    # Update existing rows to the default status, casting the string to the enum type
+    op.execute(f"UPDATE completed_orders SET status = '{CompletedOrderStatus.COMPLETED.value}'::completedorderstatus")
     
     # Now make the column NOT NULL
     op.alter_column('completed_orders', 'status', nullable=False)
     
-    # Set the server default for new rows (PostgreSQL specific)
-    op.alter_column('completed_orders', 'status', server_default=CompletedOrderStatus.COMPLETED.value)
+    # Removed server_default setting for now
+    # op.alter_column('completed_orders', 'status', server_default=CompletedOrderStatus.COMPLETED.value)
 
 
 def downgrade() -> None:
