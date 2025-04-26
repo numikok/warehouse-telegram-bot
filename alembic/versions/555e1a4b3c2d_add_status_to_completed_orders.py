@@ -32,7 +32,8 @@ def upgrade() -> None:
     op.add_column('completed_orders', sa.Column('status', completed_order_status, nullable=True))
     
     # Update existing rows to the default status, casting the string to the enum type
-    op.execute(f"UPDATE completed_orders SET status = '{CompletedOrderStatus.COMPLETED.value}'::completedorderstatus")
+    # Run this after the column is added
+    op.execute(f"UPDATE completed_orders SET status = '{CompletedOrderStatus.COMPLETED.value}'::completedorderstatus WHERE status IS NULL") 
     
     # Now make the column NOT NULL
     op.alter_column('completed_orders', 'status', nullable=False)
