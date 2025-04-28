@@ -26,6 +26,8 @@ class MenuState(str, Enum):
     WAREHOUSE_MATERIALS = "warehouse_materials"
     WAREHOUSE_COMPLETED_ORDERS = "warehouse_completed_orders"
     WAREHOUSE_VIEW_COMPLETED_ORDER = "warehouse_view_completed_order"
+    WAREHOUSE_RETURN_REQUESTS = "warehouse_return_requests"
+    VIEW_RETURN_REQUEST = "view_return_request"
     
     # Подменю продаж
     SALES_ORDER = "sales_order"
@@ -189,9 +191,8 @@ def get_menu_keyboard(menu_state: MenuState, is_admin_context: bool = False) -> 
         
         # Главное меню склада
         MenuState.WAREHOUSE_MAIN: [
-            [KeyboardButton(text="📦 Остатки")],
-            [KeyboardButton(text="📦 Мои заказы")],
-            [KeyboardButton(text="✅ Завершенные заказы")]
+            [KeyboardButton(text="📦 Остатки"), KeyboardButton(text="📦 Мои заказы")],
+            [KeyboardButton(text="✅ Завершенные заказы"), KeyboardButton(text="♻️ Запросы на возврат")]
         ],
         
         # Подменю склада

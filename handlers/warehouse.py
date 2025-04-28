@@ -1190,4 +1190,353 @@ async def check_warehouse_access(message: Message) -> bool:
             return False
         return True
     finally:
+        db.close()
+
+# --- NEW HANDLERS FOR RETURN PROCESSING ---
+
+@router.message(StateFilter(MenuState.WAREHOUSE_MAIN), F.text == "♻️ Запросы на возврат")
+async def handle_return_requests(message: Message, state: FSMContext):
+    """Displays a list of orders awaiting return confirmation."""
+    if not await check_warehouse_access(message):
+        return
+
+    await state.set_state(MenuState.WAREHOUSE_RETURN_REQUESTS)
+    db = next(get_db())
+    try:
+        return_requests = db.query(CompletedOrder).filter(
+            CompletedOrder.status == CompletedOrderStatus.RETURN_REQUESTED.value
+        ).options(
+            joinedload(CompletedOrder.manager)
+        ).order_by(desc(CompletedOrder.completed_at)).limit(30).all() # Limit to 30 requests
+
+        if not return_requests:
+            await message.answer(
+                "Нет активных запросов на возврат.",
+                reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_MAIN) # Go back to main WH menu
+            )
+            # No need to stay in WAREHOUSE_RETURN_REQUESTS state if there are no requests
+            await state.set_state(MenuState.WAREHOUSE_MAIN)
+            return
+
+        response = "♻️ Запросы на возврат (последние 30):\n\n"
+        for req in return_requests:
+            response += f"---\n"
+            response += f"Запрос на возврат ID: {req.id} (Исходный заказ #{req.order_id})\n"
+            response += f"Дата запроса (примерно): {req.updated_at.strftime('%Y-%m-%d %H:%M') if req.updated_at else 'Неизвестно'}\n"
+            response += f"Менеджер: {req.manager.username if req.manager else 'N/A'}\n"
+
+        response += f"\nВведите ID запроса на возврат для просмотра деталей и подтверждения/отклонения.\n"
+
+        if len(response) > 4000:
+            response = response[:4000] + "\n... (список слишком длинный)"
+
+        await message.answer(
+            response,
+            reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_RETURN_REQUESTS) # Keyboard with Back button
+        )
+
+    except Exception as e:
+        logging.error(f"Ошибка при получении запросов на возврат: {e}", exc_info=True)
+        await message.answer(
+            "Произошла ошибка при загрузке запросов на возврат.",
+            reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_MAIN)
+        )
+        await state.set_state(MenuState.WAREHOUSE_MAIN)
+    finally:
+        db.close()
+
+@router.message(StateFilter(MenuState.WAREHOUSE_RETURN_REQUESTS), F.text.regexp(r'^\d+$'))
+async def view_return_request_details(message: Message, state: FSMContext):
+    """Displays details of a specific return request with confirmation buttons."""
+    if not await check_warehouse_access(message):
+        return
+
+    try:
+        completed_order_id = int(message.text)
+    except ValueError:
+        await message.answer("Пожалуйста, введите корректный числовой ID.", reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_RETURN_REQUESTS))
+        return
+
+    db = next(get_db())
+    try:
+        order = db.query(CompletedOrder).options(
+            joinedload(CompletedOrder.items),
+            joinedload(CompletedOrder.joints),
+            joinedload(CompletedOrder.glues),
+            joinedload(CompletedOrder.manager),
+            joinedload(CompletedOrder.warehouse_user)
+        ).filter(
+            CompletedOrder.id == completed_order_id,
+            CompletedOrder.status == CompletedOrderStatus.RETURN_REQUESTED.value
+        ).first()
+
+        if not order:
+            await message.answer(f"Запрос на возврат с ID {completed_order_id} не найден или уже обработан.", reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_RETURN_REQUESTS))
+            return
+
+        # Format order details (similar to view_completed_order)
+        response = f"Детали запроса на возврат ID: {order.id} (Исходный заказ #{order.order_id})\n"
+        response += f"Статус: {order.status}\n"
+        response += f"Дата завершения заказа: {order.completed_at.strftime('%Y-%m-%d %H:%M')}\n"
+        response += f"Клиент: {order.customer_phone}\n"
+        response += f"Адрес: {order.delivery_address}\n"
+        shipment_date_str = order.shipment_date.strftime('%d.%m.%Y') if order.shipment_date else 'Не указана'
+        payment_method_str = order.payment_method if order.payment_method else 'Не указан'
+        response += f"🗓 Дата отгрузки: {shipment_date_str}\n"
+        response += f"💳 Способ оплаты: {payment_method_str}\n"
+        response += f"Монтаж: {'Да' if order.installation_required else 'Нет'}\n"
+        response += f"Менеджер: {order.manager.username if order.manager else 'N/A'}\n"
+        response += f"Склад (отгрузил): {order.warehouse_user.username if order.warehouse_user else 'N/A'}\n"
+
+        response += "\nВозвращаемая продукция:\n"
+        if order.items:
+            for item in order.items:
+                response += f"- {item.color} ({item.thickness} мм): {item.quantity} шт.\n"
+        else: response += "- нет\n"
+
+        response += "\nВозвращаемые стыки:\n"
+        if order.joints:
+            for joint in order.joints:
+                response += f"- {joint.joint_type.name.capitalize()} ({joint.joint_thickness} мм, {joint.joint_color}): {joint.quantity} шт.\n"
+        else: response += "- нет\n"
+
+        response += "\nВозвращаемый клей:\n"
+        if order.glues:
+            for glue_item in order.glues:
+                response += f"- {glue_item.quantity} шт.\n"
+        else: response += "- нет\n"
+
+        # Create inline keyboard for confirmation/rejection
+        keyboard_buttons = [
+            InlineKeyboardButton(text="✅ Подтвердить возврат", callback_data=f"confirm_return:{order.id}"),
+            InlineKeyboardButton(text="❌ Отклонить возврат", callback_data=f"reject_return:{order.id}")
+        ]
+        inline_keyboard = InlineKeyboardMarkup(inline_keyboard=[keyboard_buttons])
+
+        # Set state for potential further actions on this order
+        await state.set_state(MenuState.VIEW_RETURN_REQUEST)
+        await state.update_data(viewed_return_request_id=order.id)
+
+        await message.answer(
+            response,
+            reply_markup=inline_keyboard
+        )
+    except Exception as e:
+        logging.error(f"Ошибка при просмотре запроса на возврат {completed_order_id}: {e}", exc_info=True)
+        await message.answer("Произошла ошибка при загрузке деталей запроса.", reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_RETURN_REQUESTS))
+    finally:
+        db.close()
+
+@router.callback_query(F.data.startswith("confirm_return:"))
+async def process_confirm_return(callback_query: CallbackQuery, state: FSMContext):
+    """Handles the confirmation of a return request."""
+    completed_order_id = int(callback_query.data.split(":")[1])
+    user_id = callback_query.from_user.id
+    message = callback_query.message
+
+    db = next(get_db())
+    try:
+        warehouse_user = db.query(User).filter(User.telegram_id == user_id).first()
+        if not warehouse_user or warehouse_user.role not in [UserRole.WAREHOUSE, UserRole.SUPER_ADMIN]:
+            await callback_query.answer("У вас нет прав для этого действия.", show_alert=True)
+            return
+
+        order = db.query(CompletedOrder).options(
+            selectinload(CompletedOrder.items),
+            selectinload(CompletedOrder.joints),
+            selectinload(CompletedOrder.glues),
+            joinedload(CompletedOrder.manager) # Load manager for notification
+        ).filter(CompletedOrder.id == completed_order_id).first()
+
+        if not order:
+            await callback_query.answer("Запрос на возврат не найден.", show_alert=True)
+            return
+
+        if order.status != CompletedOrderStatus.RETURN_REQUESTED.value:
+            await callback_query.answer(f"Запрос уже обработан (статус: {order.status}).", show_alert=True)
+            return
+
+        # --- Start DB Transaction --- Add items back to stock
+        try:
+            logging.info(f"Confirming return for CompletedOrder ID: {order.id}. User: {user_id}")
+            stock_update_details = []
+
+            # 1. Return Finished Products
+            for item in order.items:
+                film = db.query(Film).filter(Film.code == item.color).first()
+                if film:
+                    finished_product = db.query(FinishedProduct).filter(
+                        FinishedProduct.film_id == film.id,
+                        FinishedProduct.thickness == item.thickness
+                    ).first()
+                    if finished_product:
+                        old_qty = finished_product.quantity
+                        finished_product.quantity += item.quantity
+                        stock_update_details.append(f"Продукт {item.color} ({item.thickness}мм): +{item.quantity} (было {old_qty})")
+                    else:
+                        # If product didn't exist, create it (shouldn't happen often)
+                        finished_product = FinishedProduct(film_id=film.id, thickness=item.thickness, quantity=item.quantity)
+                        db.add(finished_product)
+                        stock_update_details.append(f"Продукт {item.color} ({item.thickness}мм): +{item.quantity} (создан)")
+                else:
+                     logging.warning(f"Film {item.color} not found during return confirmation for order {order.id}")
+
+            # 2. Return Joints
+            for joint_item in order.joints:
+                joint = db.query(Joint).filter(
+                    Joint.type == joint_item.joint_type,
+                    Joint.thickness == joint_item.joint_thickness,
+                    Joint.color == joint_item.joint_color
+                ).first()
+                if joint:
+                    old_qty = joint.quantity
+                    joint.quantity += joint_item.quantity
+                    stock_update_details.append(f"Стык {joint_item.joint_type.name} ({joint_item.joint_thickness}мм, {joint_item.joint_color}): +{joint_item.quantity} (было {old_qty})")
+                else:
+                    # Create if doesn't exist
+                    joint = Joint(type=joint_item.joint_type, thickness=joint_item.joint_thickness, color=joint_item.joint_color, quantity=joint_item.quantity)
+                    db.add(joint)
+                    stock_update_details.append(f"Стык {joint_item.joint_type.name} ({joint_item.joint_thickness}мм, {joint_item.joint_color}): +{joint_item.quantity} (создан)")
+
+            # 3. Return Glue
+            for glue_item in order.glues:
+                glue = db.query(Glue).first()
+                if glue:
+                    old_qty = glue.quantity
+                    glue.quantity += glue_item.quantity
+                    stock_update_details.append(f"Клей: +{glue_item.quantity} (было {old_qty})")
+                else:
+                    glue = Glue(quantity=glue_item.quantity)
+                    db.add(glue)
+                    stock_update_details.append(f"Клей: +{glue_item.quantity} (создан)")
+
+            # Update order status
+            order.status = CompletedOrderStatus.RETURNED.value
+            order.updated_at = datetime.utcnow() # Explicitly update timestamp
+
+            # Log operation (optional but recommended)
+            # TODO: Consider adding a specific 'return' operation type?
+            operation_details = {
+                "completed_order_id": order.id,
+                "original_order_id": order.order_id,
+                "confirmed_by": warehouse_user.id,
+                "stock_updates": stock_update_details
+            }
+            op = Operation(
+                user_id=warehouse_user.id,
+                operation_type="order_return_confirmed", 
+                quantity=1, # Represents one order return
+                details=json.dumps(operation_details)
+            )
+            db.add(op)
+
+            db.commit()
+            logging.info(f"Return confirmed and stock updated for CompletedOrder ID: {order.id}")
+
+            await callback_query.answer("✅ Возврат подтвержден, остатки обновлены.", show_alert=False)
+
+            # Notify manager
+            if order.manager and order.manager.telegram_id:
+                try:
+                    await message.bot.send_message(
+                        order.manager.telegram_id,
+                        f"♻️ Возврат по заказу #{order.order_id} (Запрос ID: {order.id}) был подтвержден складом."
+                    )
+                except Exception as e:
+                    logging.error(f"Failed to send return confirmation notification to manager {order.manager.telegram_id}: {e}")
+
+            # Update message text
+            new_text = message.text.replace(f"Статус: {CompletedOrderStatus.RETURN_REQUESTED.value}", f"Статус: {CompletedOrderStatus.RETURNED.value}")
+            new_text += "\n\n✅ Возврат подтвержден складом."
+            await message.edit_text(new_text, reply_markup=None) # Remove buttons after action
+
+        except Exception as db_exc:
+            db.rollback()
+            logging.error(f"DB Error during return confirmation for order {order.id}: {db_exc}", exc_info=True)
+            await callback_query.answer("❌ Ошибка базы данных при обновлении остатков.", show_alert=True)
+        # --- End DB Transaction ---
+
+    except Exception as outer_exc:
+        logging.error(f"Outer error during return confirmation processing for order {completed_order_id}: {outer_exc}", exc_info=True)
+        await callback_query.answer("❌ Произошла общая ошибка.", show_alert=True)
+    finally:
+        db.close()
+
+@router.callback_query(F.data.startswith("reject_return:"))
+async def process_reject_return(callback_query: CallbackQuery, state: FSMContext):
+    """Handles the rejection of a return request."""
+    completed_order_id = int(callback_query.data.split(":")[1])
+    user_id = callback_query.from_user.id
+    message = callback_query.message
+
+    db = next(get_db())
+    try:
+        warehouse_user = db.query(User).filter(User.telegram_id == user_id).first()
+        if not warehouse_user or warehouse_user.role not in [UserRole.WAREHOUSE, UserRole.SUPER_ADMIN]:
+            await callback_query.answer("У вас нет прав для этого действия.", show_alert=True)
+            return
+
+        order = db.query(CompletedOrder).options(
+            joinedload(CompletedOrder.manager) # Load manager for notification
+        ).filter(CompletedOrder.id == completed_order_id).first()
+
+        if not order:
+            await callback_query.answer("Запрос на возврат не найден.", show_alert=True)
+            return
+
+        if order.status != CompletedOrderStatus.RETURN_REQUESTED.value:
+            await callback_query.answer(f"Запрос уже обработан (статус: {order.status}).", show_alert=True)
+            return
+
+        # --- Start DB Transaction ---
+        try:
+            logging.info(f"Rejecting return for CompletedOrder ID: {order.id}. User: {user_id}")
+            # Change status back to COMPLETED or to RETURN_REJECTED
+            order.status = CompletedOrderStatus.RETURN_REJECTED.value # Using the specific rejected status
+            order.updated_at = datetime.utcnow()
+
+            # Log operation (optional)
+            operation_details = {
+                 "completed_order_id": order.id,
+                 "original_order_id": order.order_id,
+                 "rejected_by": warehouse_user.id
+            }
+            op = Operation(
+                user_id=warehouse_user.id,
+                operation_type="order_return_rejected",
+                quantity=1, # Represents one order return rejection
+                details=json.dumps(operation_details)
+            )
+            db.add(op)
+
+            db.commit()
+            logging.info(f"Return rejected for CompletedOrder ID: {order.id}")
+
+            await callback_query.answer("❌ Возврат отклонен.", show_alert=False)
+
+            # Notify manager
+            if order.manager and order.manager.telegram_id:
+                try:
+                    await message.bot.send_message(
+                        order.manager.telegram_id,
+                        f"❌ Возврат по заказу #{order.order_id} (Запрос ID: {order.id}) был отклонен складом."
+                    )
+                except Exception as e:
+                    logging.error(f"Failed to send return rejection notification to manager {order.manager.telegram_id}: {e}")
+
+            # Update message text
+            new_text = message.text.replace(f"Статус: {CompletedOrderStatus.RETURN_REQUESTED.value}", f"Статус: {CompletedOrderStatus.RETURN_REJECTED.value}")
+            new_text += "\n\n❌ Возврат отклонен складом."
+            await message.edit_text(new_text, reply_markup=None) # Remove buttons
+
+        except Exception as db_exc:
+            db.rollback()
+            logging.error(f"DB Error during return rejection for order {order.id}: {db_exc}", exc_info=True)
+            await callback_query.answer("❌ Ошибка базы данных при отклонении возврата.", show_alert=True)
+        # --- End DB Transaction ---
+
+    except Exception as outer_exc:
+        logging.error(f"Outer error during return rejection processing for order {completed_order_id}: {outer_exc}", exc_info=True)
+        await callback_query.answer("❌ Произошла общая ошибка.", show_alert=True)
+    finally:
         db.close() 
