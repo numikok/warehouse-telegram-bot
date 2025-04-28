@@ -53,48 +53,6 @@ class MenuState(str, Enum):
     INVENTORY_JOINTS = "inventory_joints"
     INVENTORY_GLUE = "inventory_glue"
 
-    # Sales Manager States
-    SALES_MAIN = State()
-    SALES_CREATE_ORDER = State()
-    SALES_VIEW_ORDERS = State()
-    SALES_ORDER_DETAILS = State() # Maybe needed later
-    SALES_COMPLETED_ORDERS = State() # New state for Sales completed orders view
-    SALES_VIEW_COMPLETED_ORDER = State() # New state for Sales view specific completed order
-
-    # Production States
-    PRODUCTION_MAIN = State()
-    PRODUCTION_ORDERS = State()
-    PRODUCTION_ORDER_DETAILS = State()
-    PRODUCTION_DEFECT = State()
-    PRODUCTION_DEFECT_TYPE = State()
-    PRODUCTION_DEFECT_PANEL = State()
-    PRODUCTION_DEFECT_JOINT = State()
-    PRODUCTION_DEFECT_GLUE = State()
-
-    # Warehouse States
-    WAREHOUSE_MAIN = State()
-    WAREHOUSE_STOCK = State()
-    WAREHOUSE_INCOME = State()
-    WAREHOUSE_SHIPMENT = State()
-    WAREHOUSE_MATERIALS = State()
-    WAREHOUSE_ORDERS = State()
-    WAREHOUSE_COMPLETED_ORDERS = State() # Existing state
-    WAREHOUSE_VIEW_COMPLETED_ORDER = State() # New state for viewing specific completed order
-    INVENTORY_CATEGORIES = State()
-    INVENTORY_FINISHED_PRODUCTS = State()
-    INVENTORY_FILMS = State()
-    INVENTORY_PANELS = State()
-    INVENTORY_JOINTS = State()
-    INVENTORY_GLUE = State()
-
-    # Super Admin States
-    SUPER_ADMIN_MAIN = State()
-    SUPER_ADMIN_USERS = State()
-    SUPER_ADMIN_ADD_USER = State()
-    SUPER_ADMIN_EDIT_USER = State()
-    SUPER_ADMIN_REPORTS = State()
-    SUPER_ADMIN_SETTINGS = State()
-
 # Структура навигации: какое меню куда ведет при нажатии "Назад"
 MENU_NAVIGATION = {
     # Производство
