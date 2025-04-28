@@ -1,9 +1,9 @@
 from aiogram import Router, F
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardRemove
+from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardRemove, CallbackQuery
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from models import User, UserRole, Film, Panel, Joint, Glue, FinishedProduct, Operation, JointType, Order, ProductionOrder, OrderStatus, OrderJoint, OrderGlue, OperationType, OrderItem
+from models import User, UserRole, Film, Panel, Joint, Glue, FinishedProduct, Operation, JointType, Order, ProductionOrder, OrderStatus, OrderJoint, OrderGlue, OperationType, OrderItem, CompletedOrder, CompletedOrderStatus
 from database import get_db
 import json
 import logging
@@ -11,8 +11,9 @@ from navigation import MenuState, get_menu_keyboard, go_back
 import re
 from states import SalesStates
 from typing import Optional, Dict, List, Any, Union
-from sqlalchemy import select
+from sqlalchemy import select, desc
 from datetime import datetime
+from sqlalchemy.orm import joinedload
 
 router = Router()
 
@@ -2460,3 +2461,142 @@ async def process_order_delivery_address(message: Message, state: FSMContext):
         reply_markup=get_menu_keyboard(MenuState.SALES_ORDER_CONFIRM)
     )
     await state.set_state(SalesStates.waiting_for_order_confirmation)
+
+@router.message(F.text == "✅ Завершенные заказы", StateFilter(MenuState.SALES_MAIN))
+async def handle_completed_orders_sales(message: Message, state: FSMContext):
+    """(Sales) Отображает список завершенных заказов и предлагает ввести ID."""
+    if not await check_sales_access(message): # Reuse existing access check
+        return
+    
+    await state.set_state(MenuState.SALES_COMPLETED_ORDERS)
+    db = next(get_db())
+    try:
+        user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
+        if not user:
+            await message.answer("Ошибка: пользователь не найден.")
+            return
+            
+        # Option 1: Show only orders managed by this manager
+        # completed_orders = db.query(CompletedOrder).filter(CompletedOrder.manager_id == user.id)
+        
+        # Option 2: Show all completed orders (like warehouse view)
+        completed_orders = db.query(CompletedOrder).options(
+            joinedload(CompletedOrder.manager),
+            joinedload(CompletedOrder.warehouse_user)
+        ).order_by(desc(CompletedOrder.completed_at)).limit(20).all()
+        
+        if not completed_orders:
+            await message.answer(
+                "Нет завершенных заказов.",
+                reply_markup=get_menu_keyboard(MenuState.SALES_COMPLETED_ORDERS)
+            )
+            return
+            
+        response = "✅ Завершенные заказы (последние 20):\n\n"
+        for order in completed_orders:
+            response += f"---\n"
+            response += f"Заказ #{order.order_id} (Завершен ID: {order.id})\n"
+            response += f"Дата завершения: {order.completed_at.strftime('%Y-%m-%d %H:%M')}\n"
+            response += f"Статус: {order.status}\n"
+            response += f"Менеджер: {order.manager.username if order.manager else 'N/A'}\n"
+            response += f"\n"
+            
+        response += "\nВведите ID завершенного заказа (из поля 'Завершен ID: ...') для просмотра деталей и опций."
+        
+        if len(response) > 4000:
+            response = response[:4000] + "\n... (список слишком длинный)"
+            
+        await message.answer(
+            response,
+            reply_markup=get_menu_keyboard(MenuState.SALES_COMPLETED_ORDERS)
+        )
+            
+    except Exception as e:
+        logging.error(f"(Sales) Ошибка при получении завершенных заказов: {e}", exc_info=True)
+        await message.answer(
+            "Произошла ошибка при загрузке завершенных заказов.",
+            reply_markup=get_menu_keyboard(MenuState.SALES_COMPLETED_ORDERS)
+        )
+    finally:
+        db.close()
+
+@router.message(MenuState.SALES_COMPLETED_ORDERS, F.text.regexp(r'^\d+$'))
+async def view_completed_order_sales(message: Message, state: FSMContext):
+    """(Sales) Отображает детали одного завершенного заказа и кнопку возврата."""
+    if not await check_sales_access(message):
+        return
+
+    try:
+        completed_order_id = int(message.text)
+    except ValueError:
+        await message.answer("Пожалуйста, введите корректный числовой ID.", reply_markup=get_menu_keyboard(MenuState.SALES_COMPLETED_ORDERS))
+        return
+
+    db = next(get_db())
+    try:
+        order = db.query(CompletedOrder).options(
+            joinedload(CompletedOrder.items),
+            joinedload(CompletedOrder.joints),
+            joinedload(CompletedOrder.glues),
+            joinedload(CompletedOrder.manager),
+            joinedload(CompletedOrder.warehouse_user)
+        ).filter(CompletedOrder.id == completed_order_id).first()
+
+        if not order:
+            await message.answer(f"Завершенный заказ с ID {completed_order_id} не найден.", reply_markup=get_menu_keyboard(MenuState.SALES_COMPLETED_ORDERS))
+            return
+
+        # Format order details (same as warehouse view)
+        response = f"Детали завершенного заказа ID: {order.id} (Исходный: #{order.order_id})\n"
+        response += f"Статус: {order.status}\n"
+        response += f"Дата завершения: {order.completed_at.strftime('%Y-%m-%d %H:%M')}\n"
+        response += f"Клиент: {order.customer_phone}\n"
+        response += f"Адрес: {order.delivery_address}\n"
+        shipment_date_str = order.shipment_date.strftime('%d.%m.%Y') if order.shipment_date else 'Не указана'
+        payment_method_str = order.payment_method if order.payment_method else 'Не указан'
+        response += f"🗓 Дата отгрузки: {shipment_date_str}\n"
+        response += f"💳 Способ оплаты: {payment_method_str}\n"
+        response += f"Монтаж: {'Да' if order.installation_required else 'Нет'}\n"
+        response += f"Менеджер: {order.manager.username if order.manager else 'N/A'}\n"
+        response += f"Склад: {order.warehouse_user.username if order.warehouse_user else 'N/A'}\n"
+        
+        response += "\nПродукция:\n"
+        # ... (copy product/joint/glue formatting from warehouse.py view_completed_order) ...
+        if order.items:
+            for item in order.items:
+                response += f"- {item.color} ({item.thickness} мм): {item.quantity} шт.\n"
+        else: response += "- нет\n"
+        response += "\nСтыки:\n"
+        if order.joints:
+            for joint in order.joints:
+                response += f"- {joint.joint_type.name.capitalize()} ({joint.joint_thickness} мм, {joint.joint_color}): {joint.quantity} шт.\n"
+        else: response += "- нет\n"
+        response += "\nКлей:\n"
+        if order.glues:
+            for glue_item in order.glues:
+                response += f"- {glue_item.quantity} шт.\n"
+        else: response += "- нет\n"
+
+        # Create inline keyboard (same callback as warehouse)
+        keyboard_buttons = []
+        if order.status == CompletedOrderStatus.COMPLETED.value:
+             keyboard_buttons.append([
+                 InlineKeyboardButton(text="♻️ Запрос на возврат", callback_data=f"request_return:{order.id}")
+             ])
+        
+        inline_keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons) if keyboard_buttons else None
+
+        # Set state 
+        await state.set_state(MenuState.SALES_VIEW_COMPLETED_ORDER)
+        await state.update_data(viewed_completed_order_id=order.id)
+        
+        await message.answer(
+            response,
+            reply_markup=inline_keyboard
+        )
+
+    except Exception as e:
+        logging.error(f"(Sales) Ошибка при просмотре завершенного заказа {completed_order_id}: {e}", exc_info=True)
+        await message.answer("Произошла ошибка при загрузке деталей заказа.", reply_markup=get_menu_keyboard(MenuState.SALES_COMPLETED_ORDERS))
+    finally:
+        db.close()

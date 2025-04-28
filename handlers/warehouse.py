@@ -1,15 +1,15 @@
 from aiogram import Router, F
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from models import User, UserRole, Film, Panel, Joint, Glue, Operation, FinishedProduct, Order, CompletedOrder, OrderStatus, JointType, CompletedOrderJoint, CompletedOrderItem, CompletedOrderGlue
+from models import User, UserRole, Film, Panel, Joint, Glue, Operation, FinishedProduct, Order, CompletedOrder, OrderStatus, JointType, CompletedOrderJoint, CompletedOrderItem, CompletedOrderGlue, CompletedOrderStatus
 from database import get_db
 import json
 import logging
 from navigation import MenuState, get_menu_keyboard, go_back
-from datetime import datetime
-from sqlalchemy.orm import joinedload
+from datetime import datetime, timedelta
+from sqlalchemy.orm import joinedload, selectinload
 from sqlalchemy import desc
 
 router = Router()
@@ -572,7 +572,7 @@ async def confirm_shipment(message: Message, state: FSMContext):
 
 @router.message(F.text == "✅ Завершенные заказы")
 async def handle_completed_orders(message: Message, state: FSMContext):
-    """Отображает список завершенных заказов"""
+    """Отображает список завершенных заказов и предлагает ввести ID для деталей."""
     if not await check_warehouse_access(message):
         return
     
@@ -581,9 +581,10 @@ async def handle_completed_orders(message: Message, state: FSMContext):
     try:
         # Получаем последние 20 завершенных заказов
         completed_orders = db.query(CompletedOrder).options(
-            joinedload(CompletedOrder.items),
-            joinedload(CompletedOrder.joints),
-            joinedload(CompletedOrder.glues),
+            # Eager load related data if needed for the list view, otherwise remove
+            # joinedload(CompletedOrder.items), 
+            # joinedload(CompletedOrder.joints),
+            # joinedload(CompletedOrder.glues),
             joinedload(CompletedOrder.manager),
             joinedload(CompletedOrder.warehouse_user)
         ).order_by(desc(CompletedOrder.completed_at)).limit(20).all()
@@ -598,41 +599,11 @@ async def handle_completed_orders(message: Message, state: FSMContext):
         response = "✅ Завершенные заказы (последние 20):\n\n"
         for order in completed_orders:
             response += f"---\n"
-            response += f"Заказ #{order.order_id} (Завершен #{order.id})\n"
+            response += f"Заказ #{order.order_id} (Завершен ID: {order.id})\n"
             response += f"Дата завершения: {order.completed_at.strftime('%Y-%m-%d %H:%M')}\n"
-            response += f"Клиент: {order.customer_phone}\n"
-            response += f"Адрес: {order.delivery_address}\n"
-            # Добавляем дату отгрузки и способ оплаты
-            shipment_date_str = order.shipment_date.strftime('%d.%m.%Y') if order.shipment_date else 'Не указана'
-            payment_method_str = order.payment_method if order.payment_method else 'Не указан'
-            response += f"🗓 Дата отгрузки: {shipment_date_str}\n"
-            response += f"💳 Способ оплаты: {payment_method_str}\n"
-            response += f"Монтаж: {'Да' if order.installation_required else 'Нет'}\n"
-            response += f"Менеджер: {order.manager.username if order.manager else 'N/A'}\n"
-            response += f"Склад: {order.warehouse_user.username if order.warehouse_user else 'N/A'}\n"
-            
-            response += "\nПродукция:\n"
-            if order.items:
-                for item in order.items:
-                    response += f"- {item.color} ({item.thickness} мм): {item.quantity} шт.\n"
-            else:
-                response += "- нет\n"
-            
-            response += "\nСтыки:\n"
-            if order.joints:
-                for joint in order.joints:
-                    response += f"- {joint.joint_type.name.capitalize()} ({joint.joint_thickness} мм, {joint.joint_color}): {joint.quantity} шт.\n"
-            else:
-                response += "- нет\n"
-                
-            response += "\nКлей:\n"
-            if order.glues:
-                for glue_item in order.glues:
-                    response += f"- {glue_item.quantity} шт.\n"
-            else:
-                response += "- нет\n"
-            response += f"\n"
-            
+            response += f"Статус: {order.status}\n"
+            response += f"\nВведите ID завершенного заказа (из поля 'Завершен ID: ...') для просмотра деталей и опций.\n"
+        
         # Ограничиваем длину сообщения, если оно слишком большое
         if len(response) > 4000: # Telegram limit is 4096
             response = response[:4000] + "\n... (список слишком длинный)"
@@ -649,6 +620,134 @@ async def handle_completed_orders(message: Message, state: FSMContext):
             reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_COMPLETED_ORDERS)
         )
     finally:
+        db.close()
+
+@router.message(MenuState.WAREHOUSE_COMPLETED_ORDERS, F.text.regexp(r'^\\d+$'))
+async def view_completed_order(message: Message, state: FSMContext):
+    """Отображает детали одного завершенного заказа и кнопку запроса на возврат."""
+    if not await check_warehouse_access(message):
+        return
+
+    try:
+        completed_order_id = int(message.text)
+    except ValueError:
+        await message.answer("Пожалуйста, введите корректный числовой ID.", reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_COMPLETED_ORDERS))
+        return
+
+    db = next(get_db())
+    try:
+        order = db.query(CompletedOrder).options(
+            joinedload(CompletedOrder.items),
+            joinedload(CompletedOrder.joints),
+            joinedload(CompletedOrder.glues),
+            joinedload(CompletedOrder.manager),
+            joinedload(CompletedOrder.warehouse_user)
+        ).filter(CompletedOrder.id == completed_order_id).first()
+
+        if not order:
+            await message.answer(f"Завершенный заказ с ID {completed_order_id} не найден.", reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_COMPLETED_ORDERS))
+            return
+
+        # Format order details
+        response = f"Детали завершенного заказа ID: {order.id} (Исходный: #{order.order_id})\n"
+        response += f"Статус: {order.status}\n"
+        response += f"Дата завершения: {order.completed_at.strftime('%Y-%m-%d %H:%M')}\n"
+        response += f"Клиент: {order.customer_phone}\n"
+        response += f"Адрес: {order.delivery_address}\n"
+        shipment_date_str = order.shipment_date.strftime('%d.%m.%Y') if order.shipment_date else 'Не указана'
+        payment_method_str = order.payment_method if order.payment_method else 'Не указан'
+        response += f"🗓 Дата отгрузки: {shipment_date_str}\n"
+        response += f"💳 Способ оплаты: {payment_method_str}\n"
+        response += f"Монтаж: {'Да' if order.installation_required else 'Нет'}\n"
+        response += f"Менеджер: {order.manager.username if order.manager else 'N/A'}\n"
+        response += f"Склад: {order.warehouse_user.username if order.warehouse_user else 'N/A'}\n"
+        
+        response += "\nПродукция:\n"
+        if order.items:
+            for item in order.items:
+                response += f"- {item.color} ({item.thickness} мм): {item.quantity} шт.\n"
+        else:
+            response += "- нет\n"
+        
+        response += "\nСтыки:\n"
+        if order.joints:
+            for joint in order.joints:
+                response += f"- {joint.joint_type.name.capitalize()} ({joint.joint_thickness} мм, {joint.joint_color}): {joint.quantity} шт.\n"
+        else:
+            response += "- нет\n"
+        
+        response += "\nКлей:\n"
+        if order.glues:
+            for glue_item in order.glues:
+                response += f"- {glue_item.quantity} шт.\n"
+        else:
+            response += "- нет\n"
+
+        # Create inline keyboard
+        keyboard_buttons = []
+        if order.status == CompletedOrderStatus.COMPLETED.value:
+             keyboard_buttons.append([
+                 InlineKeyboardButton(text="♻️ Запрос на возврат", callback_data=f"request_return:{order.id}")
+             ])
+        # Add other buttons if needed, e.g., approve/reject return
+        # keyboard_buttons.append([InlineKeyboardButton(text="...", callback_data=f"...")])\n        \n        # Always add back button to the main completed orders list view?\n        # keyboard_buttons.append([InlineKeyboardButton(text="◀️ К списку", callback_data="back_to_completed_list")])\n\n        inline_keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons) if keyboard_buttons else None\n\n        # Set state for potential further actions on this order\n        await state.set_state(MenuState.WAREHOUSE_VIEW_COMPLETED_ORDER)\n        await state.update_data(viewed_completed_order_id=order.id)\n        \n        await message.answer(\n            response,\n            reply_markup=inline_keyboard\n            # Use reply_markup=get_menu_keyboard(...) if you want the main menu back instead of inline buttons\n        )\n\n    except Exception as e:\n        logging.error(f"Ошибка при просмотре завершенного заказа {completed_order_id}: {e}", exc_info=True)\n        await message.answer("Произошла ошибка при загрузке деталей заказа.", reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_COMPLETED_ORDERS))\n    finally:\n        db.close()\n\n# New callback handler for return request
+@router.callback_query(F.data.startswith("request_return:"))
+async def process_return_request(callback_query: CallbackQuery, state: FSMContext):
+    """Обрабатывает нажатие кнопки 'Запрос на возврат'."""
+    completed_order_id = int(callback_query.data.split(":")[1])
+    user_id = callback_query.from_user.id
+    message = callback_query.message
+
+    db = next(get_db())
+    try: # Outer try for DB connection management
+        user = db.query(User).filter(User.telegram_id == user_id).first()
+        if not user or user.role not in [UserRole.WAREHOUSE, UserRole.SALES_MANAGER, UserRole.SUPER_ADMIN]:
+            await callback_query.answer("У вас нет прав для этого действия.", show_alert=True)
+            # Exit early if no permissions
+            return 
+
+        order = db.query(CompletedOrder).filter(CompletedOrder.id == completed_order_id).first()
+
+        if not order:
+            await callback_query.answer("Заказ не найден.", show_alert=True)
+            # Attempt to edit message even if order not found, before returning
+            try:
+                await message.edit_text(message.text + "\n\n❌ Ошибка: Заказ не найден.")
+            except Exception as edit_err:
+                 logging.error(f"Failed to edit message on order not found: {edit_err}")
+            return
+
+        if order.status != CompletedOrderStatus.COMPLETED.value:
+            await callback_query.answer(f"Нельзя запросить возврат для заказа со статусом '{order.status}'.", show_alert=True)
+            return
+
+        # --- Start DB Transaction Logic ---
+        try: # Inner try for the actual DB update + commit/rollback
+            order.status = CompletedOrderStatus.RETURN_REQUESTED.value
+            db.commit()
+            logging.info(f"User {user_id} requested return for completed order {completed_order_id}")
+            
+            await callback_query.answer("✅ Запрос на возврат создан.", show_alert=False)
+            
+            # Update the original message after successful commit
+            new_text = message.text.replace(f"Статус: {CompletedOrderStatus.COMPLETED.value}", f"Статус: {CompletedOrderStatus.RETURN_REQUESTED.value}")
+            await message.edit_text(new_text, reply_markup=None)
+            
+            # Optional notification logic here
+            # ... 
+            
+        except Exception as db_exc:
+            db.rollback()
+            logging.error(f"Ошибка при обновлении статуса заказа {completed_order_id}: {db_exc}", exc_info=True)
+            await callback_query.answer("❌ Ошибка базы данных при обновлении статуса.", show_alert=True)
+        # --- End DB Transaction Logic ---
+
+    except Exception as outer_exc: # Catch exceptions outside the DB transaction logic (e.g., fetching user/order)
+        logging.error(f"Ошибка при обработке запроса на возврат (вне транзакции) для заказа {completed_order_id}: {outer_exc}", exc_info=True)
+        # Avoid rollback here as the issue might be before commit/update attempt
+        await callback_query.answer("❌ Произошла общая ошибка при обработке запроса.", show_alert=True)
+    finally:
+        # Always close the DB connection
         db.close()
 
 @router.message(F.text == "◀️ Назад")

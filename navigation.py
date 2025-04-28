@@ -3,6 +3,8 @@ from models import UserRole
 from enum import Enum, auto
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
+from aiogram.fsm.state import State
+import logging
 
 class MenuState(str, Enum):
     # Главное меню для каждой роли
@@ -23,6 +25,7 @@ class MenuState(str, Enum):
     WAREHOUSE_INCOME = "warehouse_income"
     WAREHOUSE_MATERIALS = "warehouse_materials"
     WAREHOUSE_COMPLETED_ORDERS = "warehouse_completed_orders"
+    WAREHOUSE_VIEW_COMPLETED_ORDER = "warehouse_view_completed_order"
     
     # Подменю продаж
     SALES_ORDER = "sales_order"
@@ -30,6 +33,8 @@ class MenuState(str, Enum):
     SALES_HISTORY = "sales_history"
     SALES_CREATE_ORDER = "sales_create_order"  # Новое состояние для создания заказа
     SALES_ORDER_CONFIRM = "sales_order_confirm"  # Подтверждение заказа
+    SALES_COMPLETED_ORDERS = "sales_completed_orders"
+    SALES_VIEW_COMPLETED_ORDER = "sales_view_completed_order"
     
     # Подменю супер-админа
     SUPER_ADMIN_USERS = "super_admin_users"
@@ -48,6 +53,48 @@ class MenuState(str, Enum):
     INVENTORY_JOINTS = "inventory_joints"
     INVENTORY_GLUE = "inventory_glue"
 
+    # Sales Manager States
+    SALES_MAIN = State()
+    SALES_CREATE_ORDER = State()
+    SALES_VIEW_ORDERS = State()
+    SALES_ORDER_DETAILS = State() # Maybe needed later
+    SALES_COMPLETED_ORDERS = State() # New state for Sales completed orders view
+    SALES_VIEW_COMPLETED_ORDER = State() # New state for Sales view specific completed order
+
+    # Production States
+    PRODUCTION_MAIN = State()
+    PRODUCTION_ORDERS = State()
+    PRODUCTION_ORDER_DETAILS = State()
+    PRODUCTION_DEFECT = State()
+    PRODUCTION_DEFECT_TYPE = State()
+    PRODUCTION_DEFECT_PANEL = State()
+    PRODUCTION_DEFECT_JOINT = State()
+    PRODUCTION_DEFECT_GLUE = State()
+
+    # Warehouse States
+    WAREHOUSE_MAIN = State()
+    WAREHOUSE_STOCK = State()
+    WAREHOUSE_INCOME = State()
+    WAREHOUSE_SHIPMENT = State()
+    WAREHOUSE_MATERIALS = State()
+    WAREHOUSE_ORDERS = State()
+    WAREHOUSE_COMPLETED_ORDERS = State() # Existing state
+    WAREHOUSE_VIEW_COMPLETED_ORDER = State() # New state for viewing specific completed order
+    INVENTORY_CATEGORIES = State()
+    INVENTORY_FINISHED_PRODUCTS = State()
+    INVENTORY_FILMS = State()
+    INVENTORY_PANELS = State()
+    INVENTORY_JOINTS = State()
+    INVENTORY_GLUE = State()
+
+    # Super Admin States
+    SUPER_ADMIN_MAIN = State()
+    SUPER_ADMIN_USERS = State()
+    SUPER_ADMIN_ADD_USER = State()
+    SUPER_ADMIN_EDIT_USER = State()
+    SUPER_ADMIN_REPORTS = State()
+    SUPER_ADMIN_SETTINGS = State()
+
 # Структура навигации: какое меню куда ведет при нажатии "Назад"
 MENU_NAVIGATION = {
     # Производство
@@ -63,6 +110,7 @@ MENU_NAVIGATION = {
     MenuState.WAREHOUSE_INCOME: MenuState.WAREHOUSE_MAIN,
     MenuState.WAREHOUSE_MATERIALS: MenuState.WAREHOUSE_MAIN,
     MenuState.WAREHOUSE_COMPLETED_ORDERS: MenuState.WAREHOUSE_MAIN,
+    MenuState.WAREHOUSE_VIEW_COMPLETED_ORDER: MenuState.WAREHOUSE_COMPLETED_ORDERS,
     MenuState.WAREHOUSE_MAIN: MenuState.SUPER_ADMIN_MAIN,  # Для возврата из роли склада в супер админа
     
     # Инвентарь - новые состояния для всех ролей
@@ -71,6 +119,7 @@ MENU_NAVIGATION = {
     MenuState.INVENTORY_PANELS: MenuState.INVENTORY_CATEGORIES,
     MenuState.INVENTORY_JOINTS: MenuState.INVENTORY_CATEGORIES,
     MenuState.INVENTORY_GLUE: MenuState.INVENTORY_CATEGORIES,
+    MenuState.INVENTORY_CATEGORIES: lambda role: ROLE_MAIN_MENU.get(role),
     
     # Продажи
     MenuState.SALES_ORDER: MenuState.SALES_MAIN,
@@ -78,6 +127,8 @@ MENU_NAVIGATION = {
     MenuState.SALES_HISTORY: MenuState.SALES_MAIN,
     MenuState.SALES_CREATE_ORDER: MenuState.SALES_MAIN,  # Возврат в главное меню продаж
     MenuState.SALES_ORDER_CONFIRM: MenuState.SALES_CREATE_ORDER,  # Возврат к созданию заказа
+    MenuState.SALES_COMPLETED_ORDERS: MenuState.SALES_MAIN,
+    MenuState.SALES_VIEW_COMPLETED_ORDER: MenuState.SALES_COMPLETED_ORDERS,
     MenuState.SALES_MAIN: MenuState.SUPER_ADMIN_MAIN,  # Для возврата из роли продаж в супер админа
     
     # Супер-админ
@@ -144,9 +195,10 @@ def get_menu_keyboard(menu_state: MenuState, is_admin_context: bool = False) -> 
         
         # Главное меню продаж
         MenuState.SALES_MAIN: [
-            [KeyboardButton(text="📝 Заказать")],
-            [KeyboardButton(text="📝 Составить заказ")],
-            [KeyboardButton(text="📦 Количество готовой продукции")]
+            [KeyboardButton(text="📝 Создать заказ")],
+            [KeyboardButton(text="📋 Мои заказы")],
+            [KeyboardButton(text="✅ Завершенные заказы")],
+            [KeyboardButton(text="📊 Остатки")],
         ],
         
         # Подменю продаж
@@ -167,9 +219,14 @@ def get_menu_keyboard(menu_state: MenuState, is_admin_context: bool = False) -> 
         ],
         
         MenuState.SALES_ORDER_CONFIRM: [
-            [KeyboardButton(text="✅ Подтвердить")],
-            [KeyboardButton(text="❌ Отменить")],
+            [KeyboardButton(text="✅ Подтвердить заказ"), KeyboardButton(text="❌ Отменить")]
+        ],
+        
+        MenuState.SALES_COMPLETED_ORDERS: [
             [KeyboardButton(text="◀️ Назад")]
+        ],
+        MenuState.SALES_VIEW_COMPLETED_ORDER: [
+            [KeyboardButton(text="◀️ К списку завершенных")]
         ],
         
         # Главное меню склада
@@ -181,6 +238,7 @@ def get_menu_keyboard(menu_state: MenuState, is_admin_context: bool = False) -> 
         
         # Подменю склада
         MenuState.WAREHOUSE_STOCK: [
+            [KeyboardButton(text="📊 Все остатки")],
             [KeyboardButton(text="◀️ Назад")]
         ],
         
@@ -193,15 +251,14 @@ def get_menu_keyboard(menu_state: MenuState, is_admin_context: bool = False) -> 
         ],
         
         MenuState.WAREHOUSE_MATERIALS: [
-            [KeyboardButton(text="Пустые панели")],
-            [KeyboardButton(text="Стыки")],
-            [KeyboardButton(text="Клей")],
             [KeyboardButton(text="◀️ Назад")]
         ],
         
-        # Клавиатура для завершенных заказов
         MenuState.WAREHOUSE_COMPLETED_ORDERS: [
             [KeyboardButton(text="◀️ Назад")]
+        ],
+        MenuState.WAREHOUSE_VIEW_COMPLETED_ORDER: [
+            [KeyboardButton(text="◀️ К списку завершенных")]
         ],
         
         # Новые меню для категорий инвентаря
@@ -289,24 +346,22 @@ def get_menu_keyboard(menu_state: MenuState, is_admin_context: bool = False) -> 
         MenuState.SUPER_ADMIN_CHINA_ORDER: [
             [KeyboardButton(text="◀️ Назад")]
         ],
+        
+        # Fallback
+        None: [[KeyboardButton(text="/start")]]
     }
     
-    # Добавляем кнопку "Назад" ко всем клавиатурам, которые ее не имеют и не являются главными меню
-    keyboard = keyboards.get(menu_state, [[KeyboardButton(text="◀️ Назад")]])
-    
-    # Если это основное меню какой-то роли, убеждаемся, что кнопки "Назад" нет
-    if menu_state in [MenuState.SUPER_ADMIN_MAIN, MenuState.SALES_MAIN, 
-                      MenuState.WAREHOUSE_MAIN, MenuState.PRODUCTION_MAIN]:
-        # Проверяем, нет ли кнопки "Назад" в последнем ряду
-        if keyboard and keyboard[-1] and any(button.text == "◀️ Назад" for button in keyboard[-1]):
-            keyboard = keyboard[:-1]  # Удаляем последний ряд с кнопкой "Назад"
-            
-    # Если это главное меню одной из ролей (кроме супер-админа) и есть флаг admin_context,
-    # добавляем кнопку "🔙 Назад" для возврата в меню супер-админа
-    if is_admin_context and menu_state in [MenuState.SALES_MAIN, MenuState.WAREHOUSE_MAIN, MenuState.PRODUCTION_MAIN]:
-        keyboard.append([KeyboardButton(text="🔙 Назад в админку")])
-    
-    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
+    # Special handling for admin context (add back button)
+    if is_admin_context and menu_state in [MenuState.WAREHOUSE_MAIN, MenuState.PRODUCTION_MAIN, MenuState.SALES_MAIN]:
+        keyboard_layout = keyboards.get(menu_state, keyboards[None])
+        # Ensure 'Назад в админку' is not already there
+        if not any(b.text == "🔙 Назад в админку" for row in keyboard_layout for b in row):
+             keyboard_layout.append([KeyboardButton(text="🔙 Назад в админку")])
+        return ReplyKeyboardMarkup(keyboard=keyboard_layout, resize_keyboard=True)
+
+    # Default return
+    keyboard_layout = keyboards.get(menu_state, keyboards[None])
+    return ReplyKeyboardMarkup(keyboard=keyboard_layout, resize_keyboard=True)
 
 async def go_back(state: FSMContext, role: UserRole) -> tuple[MenuState, ReplyKeyboardMarkup]:
     """
