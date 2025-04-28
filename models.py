@@ -241,6 +241,7 @@ class Order(Base):
             "completed_at": self.completed_at.isoformat() if self.completed_at else None
         }
 
+# Enum for completed order status - KEEP THIS for application logic
 class CompletedOrderStatus(enum.Enum):
     COMPLETED = "completed"
     RETURN_REQUESTED = "return_requested"
@@ -292,7 +293,8 @@ class CompletedOrder(Base):
     shipment_date = Column(Date, nullable=True)
     payment_method = Column(String, nullable=True)
     completed_at = Column(DateTime(timezone=True), server_default=func.now())
-    status = Column(SQLEnum(CompletedOrderStatus), nullable=False, default=CompletedOrderStatus.COMPLETED, server_default=CompletedOrderStatus.COMPLETED.value)
+    # Use String instead of SQLEnum
+    status = Column(String(50), nullable=False, default=CompletedOrderStatus.COMPLETED.value, server_default=CompletedOrderStatus.COMPLETED.value)
     
     manager = relationship("User", foreign_keys=[manager_id])
     warehouse_user = relationship("User", foreign_keys=[warehouse_user_id])
@@ -316,5 +318,5 @@ class CompletedOrder(Base):
             "shipment_date": self.shipment_date.isoformat() if self.shipment_date else None,
             "payment_method": self.payment_method,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
-            "status": self.status.value
+            "status": self.status
         } 
