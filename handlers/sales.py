@@ -2520,7 +2520,7 @@ async def handle_completed_orders_sales(message: Message, state: FSMContext):
     finally:
         db.close()
 
-@router.message(MenuState.SALES_COMPLETED_ORDERS, F.text.regexp(r'^\d+$'))
+@router.message(StateFilter(MenuState.SALES_COMPLETED_ORDERS), F.text.regexp(r'^\d+$'))
 async def view_completed_order_sales(message: Message, state: FSMContext):
     """(Sales) Отображает детали одного завершенного заказа и кнопку возврата."""
     if not await check_sales_access(message):
