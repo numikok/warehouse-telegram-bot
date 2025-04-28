@@ -689,8 +689,24 @@ async def view_completed_order(message: Message, state: FSMContext):
              keyboard_buttons.append([
                  InlineKeyboardButton(text="♻️ Запрос на возврат", callback_data=f"request_return:{order.id}")
              ])
-        # Add other buttons if needed, e.g., approve/reject return
-        # keyboard_buttons.append([InlineKeyboardButton(text="...", callback_data=f"...")])\n        \n        # Always add back button to the main completed orders list view?\n        # keyboard_buttons.append([InlineKeyboardButton(text="◀️ К списку", callback_data="back_to_completed_list")])\n\n        inline_keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons) if keyboard_buttons else None\n\n        # Set state for potential further actions on this order\n        await state.set_state(MenuState.WAREHOUSE_VIEW_COMPLETED_ORDER)\n        await state.update_data(viewed_completed_order_id=order.id)\n        \n        await message.answer(\n            response,\n            reply_markup=inline_keyboard\n            # Use reply_markup=get_menu_keyboard(...) if you want the main menu back instead of inline buttons\n        )\n\n    except Exception as e:\n        logging.error(f"Ошибка при просмотре завершенного заказа {completed_order_id}: {e}", exc_info=True)\n        await message.answer("Произошла ошибка при загрузке деталей заказа.", reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_COMPLETED_ORDERS))\n    finally:\n        db.close()\n\n# New callback handler for return request
+        
+        inline_keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons) if keyboard_buttons else None
+
+        # Set state for potential further actions on this order
+        await state.set_state(MenuState.WAREHOUSE_VIEW_COMPLETED_ORDER)
+        await state.update_data(viewed_completed_order_id=order.id)
+        
+        await message.answer(
+            response,
+            reply_markup=inline_keyboard
+        )
+
+    except Exception as e:
+        logging.error(f"Ошибка при просмотре завершенного заказа {completed_order_id}: {e}", exc_info=True)
+        await message.answer("Произошла ошибка при загрузке деталей заказа.", reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_COMPLETED_ORDERS))
+    finally:
+        db.close()
+
 @router.callback_query(F.data.startswith("request_return:"))
 async def process_return_request(callback_query: CallbackQuery, state: FSMContext):
     """Обрабатывает нажатие кнопки 'Запрос на возврат'."""
@@ -703,14 +719,12 @@ async def process_return_request(callback_query: CallbackQuery, state: FSMContex
         user = db.query(User).filter(User.telegram_id == user_id).first()
         if not user or user.role not in [UserRole.WAREHOUSE, UserRole.SALES_MANAGER, UserRole.SUPER_ADMIN]:
             await callback_query.answer("У вас нет прав для этого действия.", show_alert=True)
-            # Exit early if no permissions
             return 
 
         order = db.query(CompletedOrder).filter(CompletedOrder.id == completed_order_id).first()
 
         if not order:
             await callback_query.answer("Заказ не найден.", show_alert=True)
-            # Attempt to edit message even if order not found, before returning
             try:
                 await message.edit_text(message.text + "\n\n❌ Ошибка: Заказ не найден.")
             except Exception as edit_err:
@@ -729,12 +743,8 @@ async def process_return_request(callback_query: CallbackQuery, state: FSMContex
             
             await callback_query.answer("✅ Запрос на возврат создан.", show_alert=False)
             
-            # Update the original message after successful commit
             new_text = message.text.replace(f"Статус: {CompletedOrderStatus.COMPLETED.value}", f"Статус: {CompletedOrderStatus.RETURN_REQUESTED.value}")
             await message.edit_text(new_text, reply_markup=None)
-            
-            # Optional notification logic here
-            # ... 
             
         except Exception as db_exc:
             db.rollback()
@@ -742,12 +752,10 @@ async def process_return_request(callback_query: CallbackQuery, state: FSMContex
             await callback_query.answer("❌ Ошибка базы данных при обновлении статуса.", show_alert=True)
         # --- End DB Transaction Logic ---
 
-    except Exception as outer_exc: # Catch exceptions outside the DB transaction logic (e.g., fetching user/order)
+    except Exception as outer_exc: # Catch exceptions outside the DB transaction logic
         logging.error(f"Ошибка при обработке запроса на возврат (вне транзакции) для заказа {completed_order_id}: {outer_exc}", exc_info=True)
-        # Avoid rollback here as the issue might be before commit/update attempt
         await callback_query.answer("❌ Произошла общая ошибка при обработке запроса.", show_alert=True)
     finally:
-        # Always close the DB connection
         db.close()
 
 @router.message(F.text == "◀️ Назад")
