@@ -602,7 +602,9 @@ async def handle_completed_orders(message: Message, state: FSMContext):
             response += f"Заказ #{order.order_id} (Завершен ID: {order.id})\n"
             response += f"Дата завершения: {order.completed_at.strftime('%Y-%m-%d %H:%M')}\n"
             response += f"Статус: {order.status}\n"
-            response += f"\nВведите ID завершенного заказа (из поля 'Завершен ID: ...') для просмотра деталей и опций.\n"
+            # Removed the prompt to enter ID here as the next handler handles it
+        
+        response += f"\nВведите ID завершенного заказа (из поля 'Завершен ID: ...') для просмотра деталей и опций.\n" 
         
         # Ограничиваем длину сообщения, если оно слишком большое
         if len(response) > 4000: # Telegram limit is 4096
@@ -622,7 +624,7 @@ async def handle_completed_orders(message: Message, state: FSMContext):
     finally:
         db.close()
 
-@router.message(MenuState.WAREHOUSE_COMPLETED_ORDERS, F.text.regexp(r'^\\d+$'))
+@router.message(StateFilter(MenuState.WAREHOUSE_COMPLETED_ORDERS), F.text.regexp(r'^\d+$'))
 async def view_completed_order(message: Message, state: FSMContext):
     """Отображает детали одного завершенного заказа и кнопку запроса на возврат."""
     if not await check_warehouse_access(message):
@@ -700,7 +702,6 @@ async def view_completed_order(message: Message, state: FSMContext):
             response,
             reply_markup=inline_keyboard
         )
-
     except Exception as e:
         logging.error(f"Ошибка при просмотре завершенного заказа {completed_order_id}: {e}", exc_info=True)
         await message.answer("Произошла ошибка при загрузке деталей заказа.", reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_COMPLETED_ORDERS))
