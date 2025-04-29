@@ -1199,23 +1199,44 @@ async def handle_return_requests(message: Message, state: FSMContext):
     """Displays a list of orders awaiting return confirmation."""
     if not await check_warehouse_access(message):
         return
-
-    await state.set_state(MenuState.WAREHOUSE_RETURN_REQUESTS)
+        
+    # Получим роль пользователя для определения правильного состояния для возврата
     db = next(get_db())
     try:
+        user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
+        user_role = user.role if user else UserRole.NONE
+        return_menu_state = MenuState.WAREHOUSE_MAIN  # По умолчанию для склада
+        
+        # Установим текущее состояние на просмотр запросов
+        await state.set_state(MenuState.WAREHOUSE_RETURN_REQUESTS)
+        
+        # Запрашиваем запросы на возврат
         return_requests = db.query(CompletedOrder).filter(
             CompletedOrder.status == CompletedOrderStatus.RETURN_REQUESTED.value
         ).options(
             joinedload(CompletedOrder.manager)
         ).order_by(desc(CompletedOrder.completed_at)).limit(30).all() # Limit to 30 requests
 
+        # Определим состояние для возврата в зависимости от роли
+        if user_role == UserRole.SALES_MANAGER:
+            return_menu_state = MenuState.SALES_MAIN
+        elif user_role == UserRole.SUPER_ADMIN:
+            # Для суперадмина, проверим, в каком контексте он работает
+            state_data = await state.get_data()
+            is_admin_context = state_data.get("is_admin_context", False)
+            if is_admin_context:
+                # Если суперадмин эмулирует склад
+                return_menu_state = MenuState.WAREHOUSE_MAIN
+            else:
+                return_menu_state = MenuState.SUPER_ADMIN_MAIN
+
         if not return_requests:
+            # Если нет запросов, вернемся в соответствующее меню роли
             await message.answer(
                 "Нет активных запросов на возврат.",
-                reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_MAIN) # Go back to main WH menu
+                reply_markup=get_menu_keyboard(return_menu_state)
             )
-            # No need to stay in WAREHOUSE_RETURN_REQUESTS state if there are no requests
-            await state.set_state(MenuState.WAREHOUSE_MAIN)
+            await state.set_state(return_menu_state)
             return
 
         response = "♻️ Запросы на возврат (последние 30):\n\n"
@@ -1229,6 +1250,9 @@ async def handle_return_requests(message: Message, state: FSMContext):
 
         if len(response) > 4000:
             response = response[:4000] + "\n... (список слишком длинный)"
+
+        # Сохраним состояние возврата для использования в последующих обработчиках
+        await state.update_data(return_menu_state=return_menu_state)
 
         await message.answer(
             response,
@@ -1450,9 +1474,19 @@ async def process_confirm_return(callback_query: CallbackQuery, state: FSMContex
             new_text += "\n\n✅ Возврат подтвержден складом."
             await message.edit_text(new_text, reply_markup=None)
             
-            # Return to the list of return requests
-            await state.set_state(MenuState.WAREHOUSE_RETURN_REQUESTS)
-            await handle_return_requests(message, state)
+            # Return to the list of return requests or appropriate menu based on user role
+            state_data = await state.get_data()
+            return_menu_state = state_data.get("return_menu_state", MenuState.WAREHOUSE_MAIN)
+
+            # If returning to main menu of role, go directly there
+            if return_menu_state in [MenuState.WAREHOUSE_MAIN, MenuState.SALES_MAIN, MenuState.SUPER_ADMIN_MAIN]:
+                await state.set_state(return_menu_state)
+                await message.answer("Возврат подтвержден. Возвращаемся в главное меню.", 
+                                     reply_markup=get_menu_keyboard(return_menu_state))
+            else:
+                # Otherwise return to the list of return requests
+                await state.set_state(MenuState.WAREHOUSE_RETURN_REQUESTS)
+                await handle_return_requests(message, state)
 
         except Exception as db_exc:
             db.rollback()
@@ -1533,9 +1567,19 @@ async def process_reject_return(callback_query: CallbackQuery, state: FSMContext
             new_text += "\n\n❌ Возврат отклонен складом."
             await message.edit_text(new_text, reply_markup=None)
             
-            # Return to the list of return requests
-            await state.set_state(MenuState.WAREHOUSE_RETURN_REQUESTS)
-            await handle_return_requests(message, state)
+            # Return to the list of return requests or appropriate menu based on user role
+            state_data = await state.get_data()
+            return_menu_state = state_data.get("return_menu_state", MenuState.WAREHOUSE_MAIN)
+
+            # If returning to main menu of role, go directly there
+            if return_menu_state in [MenuState.WAREHOUSE_MAIN, MenuState.SALES_MAIN, MenuState.SUPER_ADMIN_MAIN]:
+                await state.set_state(return_menu_state)
+                await message.answer("Возврат отклонен. Возвращаемся в главное меню.", 
+                                     reply_markup=get_menu_keyboard(return_menu_state))
+            else:
+                # Otherwise return to the list of return requests
+                await state.set_state(MenuState.WAREHOUSE_RETURN_REQUESTS)
+                await handle_return_requests(message, state)
 
         except Exception as db_exc:
             db.rollback()

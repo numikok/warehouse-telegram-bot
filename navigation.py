@@ -72,6 +72,8 @@ MENU_NAVIGATION = {
     MenuState.WAREHOUSE_MATERIALS: MenuState.WAREHOUSE_MAIN,
     MenuState.WAREHOUSE_COMPLETED_ORDERS: MenuState.WAREHOUSE_MAIN,
     MenuState.WAREHOUSE_VIEW_COMPLETED_ORDER: MenuState.WAREHOUSE_COMPLETED_ORDERS,
+    MenuState.WAREHOUSE_RETURN_REQUESTS: MenuState.WAREHOUSE_MAIN,
+    MenuState.VIEW_RETURN_REQUEST: MenuState.WAREHOUSE_RETURN_REQUESTS,
     MenuState.WAREHOUSE_MAIN: MenuState.SUPER_ADMIN_MAIN,  # Для возврата из роли склада в супер админа
     
     # Инвентарь - новые состояния для всех ролей
