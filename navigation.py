@@ -158,7 +158,7 @@ def get_menu_keyboard(menu_state: MenuState, is_admin_context: bool = False) -> 
         
         # Главное меню продаж
         MenuState.SALES_MAIN: [
-            [KeyboardButton(text="📝 Создать заказ")],
+            [KeyboardButton(text="📝 Составить заказ")],
             [KeyboardButton(text="📋 Мои заказы")],
             [KeyboardButton(text="✅ Завершенные заказы")],
             [KeyboardButton(text="📊 Остатки")],
