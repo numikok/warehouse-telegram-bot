@@ -17,6 +17,15 @@ from sqlalchemy.orm import joinedload
 
 router = Router()
 
+def has_sales_access(telegram_id: int) -> bool:
+    """Проверяет, имеет ли пользователь доступ к функциям продаж"""
+    db = next(get_db())
+    try:
+        user = db.query(User).filter(User.telegram_id == telegram_id).first()
+        return user and (user.role == UserRole.SALES_MANAGER or user.role == UserRole.SUPER_ADMIN)
+    finally:
+        db.close()
+
 def get_joint_type_keyboard():
     """Возвращает клавиатуру с типами стыков"""
     db = next(get_db())
@@ -1738,68 +1747,49 @@ async def process_panel_thickness(message: Message, state: FSMContext):
 
 @router.message(F.text == "📦 Заказать на склад")
 async def handle_warehouse_order(message: Message, state: FSMContext):
-    if not await check_sales_access(message):
+    """Обработка нажатия кнопки 'Заказать на склад'"""
+    
+    # Проверяем доступ
+    if not has_sales_access(message.from_user.id):
         return
     
-    # Получаем флаг админ-контекста
-    state_data = await state.get_data()
-    is_admin_context = state_data.get("is_admin_context", False)
-    
-    await state.set_state(MenuState.SALES_ORDER)
     db = next(get_db())
     try:
-        # Получаем список готовой продукции
-        finished_products = db.query(FinishedProduct).join(Film).all()
-        if not finished_products:
+        # Получаем готовую продукцию
+        finished_products = db.query(FinishedProduct).all()
+        
+        if finished_products:
+            data = await state.get_data()
+            is_admin_context = data.get("is_admin_context", False)
+            
+            # Формируем сообщение с доступными товарами
+            product_text = "Доступные товары:\n\n"
+            
+            # Создаем клавиатуру с доступными товарами
+            keyboard = InlineKeyboardMarkup(row_width=1)
+            
+            for product in finished_products:
+                product_text += f"ID: {product.id}, Пленка: {product.film_color}, Количество: {product.quantity}\n"
+                keyboard.add(InlineKeyboardButton(
+                    text=f"{product.film_color} (доступно: {product.quantity})",
+                    callback_data=f"order_finished:{product.id}"
+                ))
+            
+            keyboard.add(InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_order"))
+            
+            await message.answer(product_text, reply_markup=keyboard)
+            await state.set_state(SalesStates.waiting_for_warehouse_selection)
+        else:
+            await message.answer("⚠️ На складе нет доступной продукции")
+            
+            # Устанавливаем состояние меню и возвращаем соответствующую клавиатуру
+            data = await state.get_data()
+            is_admin_context = data.get("is_admin_context", False)
+            await state.set_state(MenuState.SALES_MAIN)
             await message.answer(
-                "На складе нет готовой продукции.",
+                "Выберите действие:", 
                 reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
             )
-            return
-        
-        # Создаем информационное сообщение
-        products_info = []
-        available_films = set()
-        
-        for product in finished_products:
-            if product.quantity > 0:
-                products_info.append(
-                    f"• Панели с пленкой {product.film.code} (толщина: {product.thickness} мм): {product.quantity} шт."
-                )
-                available_films.add(product.film.code)
-        
-        if not products_info:
-            await message.answer(
-                "На складе нет готовой продукции.",
-                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
-            )
-            return
-        
-        # Создаем клавиатуру с кодами доступных пленок
-        keyboard = []
-        available_films = sorted(list(available_films))
-        
-        # Размещаем по 2 кнопки в ряд для кодов пленки
-        for i in range(0, len(available_films), 2):
-            row = []
-            row.append(KeyboardButton(text=available_films[i]))
-            if i + 1 < len(available_films):
-                row.append(KeyboardButton(text=available_films[i + 1]))
-            keyboard.append(row)
-        
-        # Добавляем кнопку назад
-        keyboard.append([KeyboardButton(text="◀️ Назад")])
-        
-        reply_markup = ReplyKeyboardMarkup(
-            keyboard=keyboard,
-            resize_keyboard=True
-        )
-        
-        await message.answer(
-            "Доступная продукция на складе:\n\n" + "\n".join(products_info) + "\n\nВыберите код пленки:",
-            reply_markup=reply_markup
-        )
-        await state.set_state(SalesStates.waiting_for_film_code)
     finally:
         db.close()
 
@@ -2013,16 +2003,13 @@ async def process_panel_quantity(message: Message, state: FSMContext):
             
             await message.answer(order_text)
             
-            # Возвращаем клавиатуру менеджера
-            keyboard = ReplyKeyboardMarkup(
-                keyboard=[
-                    [KeyboardButton(text="📝 Заказать")],
-                    [KeyboardButton(text="📦 Заказать на склад")],
-                    [KeyboardButton(text="📦 Количество готовой продукции")]
-                ],
-                resize_keyboard=True
+            # Возвращаем клавиатуру менеджера и устанавливаем состояние SALES_MAIN
+            is_admin_context = data.get("is_admin_context", False)
+            await state.set_state(MenuState.SALES_MAIN)
+            await message.answer(
+                "Выберите действие:",
+                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
             )
-            await message.answer("Выберите действие:", reply_markup=keyboard)
             
         except Exception as e:
             await message.answer(f"❌ Ошибка при создании заказа: {str(e)}")
@@ -2062,6 +2049,7 @@ async def process_panels_count(message: Message, state: FSMContext):
             
         # Получаем сохраненные данные
         data = await state.get_data()
+        is_admin_context = data.get("is_admin_context", False)
         
         db = next(get_db())
         try:
@@ -2091,22 +2079,16 @@ async def process_panels_count(message: Message, state: FSMContext):
             
             await message.answer(order_text)
             
-            # Возвращаем клавиатуру менеджера
-            keyboard = ReplyKeyboardMarkup(
-                keyboard=[
-                    [KeyboardButton(text="📝 Заказать")],
-                    [KeyboardButton(text="📦 Заказать на склад")],
-                    [KeyboardButton(text="📦 Количество готовой продукции")]
-                ],
-                resize_keyboard=True
+            # Устанавливаем состояние меню и возвращаем соответствующую клавиатуру
+            await state.set_state(MenuState.SALES_MAIN)
+            await message.answer(
+                "Выберите действие:", 
+                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
             )
-            await message.answer("Выберите действие:", reply_markup=keyboard)
-            
         except Exception as e:
             await message.answer(f"❌ Ошибка при создании заказа: {str(e)}")
         finally:
             db.close()
-            await state.clear()
     except ValueError:
         await message.answer("❌ Пожалуйста, введите число")
 
