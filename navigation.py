@@ -182,7 +182,7 @@ def get_menu_keyboard(menu_state: MenuState, is_admin_context: bool = False) -> 
         ],
         
         MenuState.SALES_ORDER_CONFIRM: [
-            [KeyboardButton(text="✅ Подтвердить заказ"), KeyboardButton(text="❌ Отменить")]
+            [KeyboardButton(text="✅ Подтвердить"), KeyboardButton(text="❌ Отменить"), KeyboardButton(text="◀️ Назад")]
         ],
         
         MenuState.SALES_COMPLETED_ORDERS: [
