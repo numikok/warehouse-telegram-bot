@@ -21,31 +21,31 @@ class OrderStates(StatesGroup):
     waiting_for_phone = State()
     waiting_for_address = State()
 
-@router.message(F.text == "📝 Создать заказ")
-async def start_order(message: Message, state: FSMContext):
-    db = next(get_db())
-    try:
-        # Получаем список доступных пленок
-        films = db.query(Film).all()
-        film_codes = [film.code for film in films]
-        
-        if not film_codes:
-            await message.answer("❌ Нет доступных пленок в базе данных.")
-            return
-            
-        # Создаем клавиатуру с кодами пленок
-        keyboard = []
-        for code in film_codes:
-            keyboard.append([KeyboardButton(text=code)])
-        keyboard.append([KeyboardButton(text="◀️ Назад")])
-        
-        await message.answer(
-            "Выберите код пленки из списка:",
-            reply_markup=ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
-        )
-        await state.set_state(OrderStates.waiting_for_film_code)
-    finally:
-        db.close()
+# @router.message(F.text == "📝 Составить заказ")
+# async def start_order(message: Message, state: FSMContext):
+#     db = next(get_db())
+#     try:
+#         # Получаем список доступных пленок
+#         films = db.query(Film).all()
+#         film_codes = [film.code for film in films]
+#         
+#         if not film_codes:
+#             await message.answer("❌ Нет доступных пленок в базе данных.")
+#             return
+#             
+#         # Создаем клавиатуру с кодами пленок
+#         keyboard = []
+#         for code in film_codes:
+#             keyboard.append([KeyboardButton(text=code)])
+#         keyboard.append([KeyboardButton(text="◀️ Назад")])
+#         
+#         await message.answer(
+#             "Выберите код пленки из списка:",
+#             reply_markup=ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
+#         )
+#         await state.set_state(OrderStates.waiting_for_film_code)
+#     finally:
+#         db.close()
 
 @router.message(OrderStates.waiting_for_film_code)
 async def process_film_code(message: Message, state: FSMContext):
