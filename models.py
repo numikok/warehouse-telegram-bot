@@ -295,6 +295,7 @@ class CompletedOrder(Base):
     completed_at = Column(DateTime(timezone=True), server_default=func.now())
     # Use String instead of SQLEnum
     status = Column(String(50), nullable=False, default=CompletedOrderStatus.COMPLETED.value, server_default=CompletedOrderStatus.COMPLETED.value)
+    updated_at = Column(DateTime(timezone=True), nullable=True, onupdate=func.now())
     
     manager = relationship("User", foreign_keys=[manager_id])
     warehouse_user = relationship("User", foreign_keys=[warehouse_user_id])
