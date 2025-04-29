@@ -322,31 +322,60 @@ def get_menu_keyboard(menu_state: MenuState, is_admin_context: bool = False) -> 
     keyboard_layout = keyboards.get(menu_state, keyboards[None])
     return ReplyKeyboardMarkup(keyboard=keyboard_layout, resize_keyboard=True)
 
-async def go_back(state: FSMContext, role: UserRole) -> tuple[MenuState, ReplyKeyboardMarkup]:
+async def go_back(state: FSMContext, role: UserRole) -> tuple[MenuState | None, ReplyKeyboardMarkup]:
     """
-    Возвращает предыдущее состояние меню и соответствующую клавиатуру
+    Возвращает предыдущее состояние меню и соответствующую клавиатуру.
+    Возвращает None для состояния, если не удается определить предыдущее.
     """
-    current_state = await state.get_state()
-    if not current_state:
-        # Если состояние не установлено, возвращаемся в главное меню роли
-        main_menu = ROLE_MAIN_MENU[role]
-        return main_menu, get_menu_keyboard(main_menu)
+    current_state_str = await state.get_state()
+    logging.info(f"go_back called. Current state string: {current_state_str}, Role: {role}")
     
-    try:
-        # Получаем текущее состояние меню из FSM
-        current_menu = MenuState(current_state)
+    next_menu: MenuState | None = None
+    main_role_menu = ROLE_MAIN_MENU.get(role)
+
+    if not current_state_str:
+        # Если состояние не установлено, возвращаемся в главное меню роли
+        logging.warning("Current state is None, returning to main role menu.")
+        next_menu = main_role_menu
+    else:
+        try:
+            current_menu = MenuState(current_state_str)
+            logging.info(f"Current menu state resolved to: {current_menu}")
+            
+            # Определяем, куда нужно вернуться
+            nav_target = MENU_NAVIGATION.get(current_menu)
+            logging.info(f"Navigation target from MENU_NAVIGATION: {nav_target}")
+            
+            if callable(nav_target):
+                logging.info("Navigation target is callable, executing with role.")
+                next_menu = nav_target(role) # Call the lambda function
+                logging.info(f"Result from callable: {next_menu}")
+            elif isinstance(nav_target, MenuState):
+                next_menu = nav_target
+            else:
+                # Если нет указанного перехода или target не callable/MenuState
+                logging.warning(f"No valid navigation target found for {current_menu}, returning to main role menu.")
+                next_menu = main_role_menu
+
+        except ValueError:
+            # Если текущее состояние не является MenuState, возвращаемся в главное меню роли
+            logging.warning(f"Current state '{current_state_str}' is not a valid MenuState, returning to main role menu.")
+            next_menu = main_role_menu
+
+    if next_menu is None:
+        # Если главное меню роли не найдено (e.g., Role.NONE) или другая ошибка
+        logging.error(f"Could not determine next menu. Returning None state and empty keyboard.")
+        # Вернуть None для состояния и пустую клавиатуру, чтобы вызвать /start
+        return None, ReplyKeyboardRemove() 
         
-        # Определяем, куда нужно вернуться
-        next_menu = MENU_NAVIGATION.get(current_menu)
-        if not next_menu:
-            # Если нет указанного перехода, возвращаемся в главное меню роли
-            next_menu = ROLE_MAIN_MENU[role]
-        
-        return next_menu, get_menu_keyboard(next_menu)
-    except ValueError:
-        # Если текущее состояние не является MenuState, возвращаемся в главное меню роли
-        main_menu = ROLE_MAIN_MENU[role]
-        return main_menu, get_menu_keyboard(main_menu)
+    logging.info(f"Determined next menu state: {next_menu}")
+    # Получаем state_data для проверки is_admin_context
+    state_data = await state.get_data()
+    is_admin_context = state_data.get("is_admin_context", False)
+    logging.info(f"Getting keyboard for {next_menu} with is_admin_context={is_admin_context}")
+    
+    keyboard = get_menu_keyboard(next_menu, is_admin_context)
+    return next_menu, keyboard
 
 def get_role_keyboard(role: UserRole) -> ReplyKeyboardMarkup:
     """Возвращает главную клавиатуру для роли"""
