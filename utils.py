@@ -23,12 +23,12 @@ async def check_production_access(message: Message) -> bool:
 async def check_warehouse_access(message: Message) -> bool:
     """
     Проверяет, имеет ли пользователь доступ к функциям склада
-    (должен иметь роль WAREHOUSE или SUPER_ADMIN)
+    (должен иметь роль WAREHOUSE, SALES_MANAGER или SUPER_ADMIN)
     """
     db = next(get_db())
     try:
         user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
-        if not user or (user.role != UserRole.WAREHOUSE and user.role != UserRole.SUPER_ADMIN):
+        if not user or (user.role != UserRole.WAREHOUSE and user.role != UserRole.SUPER_ADMIN and user.role != UserRole.SALES_MANAGER):
             await message.answer("У вас нет прав для выполнения этой команды.")
             return False
         return True

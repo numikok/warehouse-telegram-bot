@@ -1183,8 +1183,8 @@ async def check_warehouse_access(message: Message) -> bool:
     db = next(get_db())
     try:
         user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
-        # Доступ к остаткам есть у Склада, Производства и Суперадмина
-        allowed_roles = [UserRole.WAREHOUSE, UserRole.PRODUCTION, UserRole.SUPER_ADMIN]
+        # Доступ к остаткам есть у Склада, Производства, Менеджеров по продажам и Суперадмина
+        allowed_roles = [UserRole.WAREHOUSE, UserRole.PRODUCTION, UserRole.SUPER_ADMIN, UserRole.SALES_MANAGER]
         if not user or user.role not in allowed_roles:
             await message.answer("У вас нет прав для просмотра остатков.")
             return False
@@ -1337,7 +1337,7 @@ async def process_confirm_return(callback_query: CallbackQuery, state: FSMContex
     db = next(get_db())
     try:
         warehouse_user = db.query(User).filter(User.telegram_id == user_id).first()
-        if not warehouse_user or warehouse_user.role not in [UserRole.WAREHOUSE, UserRole.SUPER_ADMIN]:
+        if not warehouse_user or warehouse_user.role not in [UserRole.WAREHOUSE, UserRole.SUPER_ADMIN, UserRole.SALES_MANAGER]:
             await callback_query.answer("У вас нет прав для этого действия.", show_alert=True)
             return
 
@@ -1448,7 +1448,11 @@ async def process_confirm_return(callback_query: CallbackQuery, state: FSMContex
             # Update message text
             new_text = message.text.replace(f"Статус: {CompletedOrderStatus.RETURN_REQUESTED.value}", f"Статус: {CompletedOrderStatus.RETURNED.value}")
             new_text += "\n\n✅ Возврат подтвержден складом."
-            await message.edit_text(new_text, reply_markup=None) # Remove buttons after action
+            await message.edit_text(new_text, reply_markup=None)
+            
+            # Return to the list of return requests
+            await state.set_state(MenuState.WAREHOUSE_RETURN_REQUESTS)
+            await handle_return_requests(message, state)
 
         except Exception as db_exc:
             db.rollback()
@@ -1472,7 +1476,7 @@ async def process_reject_return(callback_query: CallbackQuery, state: FSMContext
     db = next(get_db())
     try:
         warehouse_user = db.query(User).filter(User.telegram_id == user_id).first()
-        if not warehouse_user or warehouse_user.role not in [UserRole.WAREHOUSE, UserRole.SUPER_ADMIN]:
+        if not warehouse_user or warehouse_user.role not in [UserRole.WAREHOUSE, UserRole.SUPER_ADMIN, UserRole.SALES_MANAGER]:
             await callback_query.answer("У вас нет прав для этого действия.", show_alert=True)
             return
 
@@ -1527,7 +1531,11 @@ async def process_reject_return(callback_query: CallbackQuery, state: FSMContext
             # Update message text
             new_text = message.text.replace(f"Статус: {CompletedOrderStatus.RETURN_REQUESTED.value}", f"Статус: {CompletedOrderStatus.RETURN_REJECTED.value}")
             new_text += "\n\n❌ Возврат отклонен складом."
-            await message.edit_text(new_text, reply_markup=None) # Remove buttons
+            await message.edit_text(new_text, reply_markup=None)
+            
+            # Return to the list of return requests
+            await state.set_state(MenuState.WAREHOUSE_RETURN_REQUESTS)
+            await handle_return_requests(message, state)
 
         except Exception as db_exc:
             db.rollback()
