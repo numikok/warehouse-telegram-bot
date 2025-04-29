@@ -5,6 +5,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 from aiogram.fsm.state import State
 import logging
+from typing import Union
 
 class MenuState(str, Enum):
     # Главное меню для каждой роли
@@ -322,7 +323,7 @@ def get_menu_keyboard(menu_state: MenuState, is_admin_context: bool = False) -> 
     keyboard_layout = keyboards.get(menu_state, keyboards[None])
     return ReplyKeyboardMarkup(keyboard=keyboard_layout, resize_keyboard=True)
 
-async def go_back(state: FSMContext, role: UserRole) -> tuple[MenuState | None, ReplyKeyboardMarkup]:
+async def go_back(state: FSMContext, role: UserRole) -> tuple[Union[MenuState, None], ReplyKeyboardMarkup]:
     """
     Возвращает предыдущее состояние меню и соответствующую клавиатуру.
     Возвращает None для состояния, если не удается определить предыдущее.
@@ -330,7 +331,7 @@ async def go_back(state: FSMContext, role: UserRole) -> tuple[MenuState | None, 
     current_state_str = await state.get_state()
     logging.info(f"go_back called. Current state string: {current_state_str}, Role: {role}")
     
-    next_menu: MenuState | None = None
+    next_menu: Union[MenuState, None] = None
     main_role_menu = ROLE_MAIN_MENU.get(role)
 
     if not current_state_str:
