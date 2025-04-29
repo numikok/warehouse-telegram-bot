@@ -18,6 +18,7 @@ from handlers import (
     orders,
     super_admin,
     back_handler,
+    warehouse_callbacks,
 )
 from handlers.admin import cmd_users, cmd_report, cmd_assign_role
 from handlers.sales import handle_warehouse_order, handle_stock, handle_create_order
@@ -50,6 +51,7 @@ dp.include_router(sales.router)
 dp.include_router(warehouse.router)
 dp.include_router(production_orders.router)
 dp.include_router(orders.router)
+dp.include_router(warehouse_callbacks.router)
 dp.include_router(back_handler.router)
 
 # Создаем Flask приложение

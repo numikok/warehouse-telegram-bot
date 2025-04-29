@@ -137,6 +137,9 @@ class SalesStates(StatesGroup):
     waiting_for_shipment_date = State()
     waiting_for_payment_method = State()
     
+    # Состояние для заказа со склада
+    waiting_for_warehouse_selection = State()
+    
 class AdminStates(StatesGroup):
     waiting_for_user_id = State()
     waiting_for_role = State()
