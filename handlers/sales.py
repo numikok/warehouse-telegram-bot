@@ -1972,8 +1972,8 @@ async def process_panel_quantity(message: Message, state: FSMContext):
             possible_panels = film.calculate_possible_panels()
             if quantity > possible_panels:
                 await message.answer(
-                    f"❌ Недостаточно пленки для производства {quantity} панелей.\\n"
-                    f"Максимально возможное количество: {possible_panels} панелей.\\n"
+                    f"❌ Недостаточно пленки для производства {quantity} панелей.\n"
+                    f"Максимально возможное количество: {possible_panels} панелей.\n"
                     f"Пожалуйста, введите другое количество:"
                 )
                 return
@@ -1995,9 +1995,9 @@ async def process_panel_quantity(message: Message, state: FSMContext):
             
             # Формируем сообщение о созданном заказе
             order_text = (
-                f"✅ Заказ #{production_order.id} успешно создан!\\n\\n"
-                f"Толщина панелей: {panel_thickness} мм\\n"  # Добавляем информацию о толщине
-                f"Цвет: {production_order.film_color}\\n"
+                f"✅ Заказ #{production_order.id} успешно создан!\n\n"
+                f"Толщина панелей: {panel_thickness} мм\n"  # Добавляем информацию о толщине
+                f"Цвет: {production_order.film_color}\n"
                 f"Количество панелей: {production_order.panel_quantity}"
             )
             
