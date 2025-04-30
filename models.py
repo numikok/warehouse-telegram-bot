@@ -133,6 +133,7 @@ class OrderStatus(enum.Enum):
     COMPLETED = "completed"
     CANCELLED = "cancelled"
     CREATED = "created"
+    RESERVED = "reserved"  # Новый статус для бронирования заказов
 
 class OrderJoint(Base):
     __tablename__ = "order_joints"
@@ -321,3 +322,30 @@ class CompletedOrder(Base):
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
             "status": self.status
         } 
+
+class OrderProduct(Base):
+    __tablename__ = "order_products"
+
+    id = Column(Integer, primary_key=True, index=True)
+    order_id = Column(Integer, ForeignKey("orders.id", ondelete="CASCADE"))
+    product_id = Column(Integer, ForeignKey("products.id"))
+    quantity = Column(Integer)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    order = relationship("Order", back_populates="products")
+    product = relationship("Product")
+
+
+class StockReservation(Base):
+    __tablename__ = "stock_reservations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    order_id = Column(Integer, ForeignKey("orders.id", ondelete="CASCADE"))
+    product_id = Column(Integer, ForeignKey("products.id"))
+    quantity = Column(Integer)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    order = relationship("Order")
+    product = relationship("Product") 
