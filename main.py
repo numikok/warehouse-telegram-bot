@@ -23,7 +23,7 @@ from handlers import (
 from handlers.admin import cmd_users, cmd_report, cmd_assign_role
 from handlers.sales import handle_warehouse_order, handle_stock, handle_create_order
 from handlers.warehouse import cmd_stock, cmd_confirm_order, cmd_income_materials
-from navigation import get_role_keyboard, MenuState
+from navigation import get_role_keyboard, MenuState, go_back, get_menu_keyboard, get_main_menu_state_for_role
 import http.server
 import socketserver
 import threading
@@ -514,7 +514,7 @@ async def button_back(message: Message, state: FSMContext):
                     return
                     
                 main_menu_state = get_main_menu_state_for_role(user.role)
-                next_menu, keyboard = navigation.go_back(main_menu_state)
+                next_menu, keyboard = go_back(main_menu_state)
                 
                 await state.set_state(next_menu)
                 await message.answer("Вы вернулись в главное меню.", reply_markup=keyboard, parse_mode="Markdown")
@@ -531,7 +531,7 @@ async def button_back(message: Message, state: FSMContext):
                     return
                     
                 main_menu_state = get_main_menu_state_for_role(user.role)
-                next_menu, keyboard = navigation.get_menu_keyboard(main_menu_state)
+                next_menu, keyboard = get_menu_keyboard(main_menu_state)
                 
                 await state.set_state(next_menu)
                 await message.answer("Вы вернулись в главное меню.", reply_markup=keyboard, parse_mode="Markdown")
@@ -539,7 +539,7 @@ async def button_back(message: Message, state: FSMContext):
                 db.close()
             return
             
-    next_menu, keyboard = navigation.go_back(menu_state)
+    next_menu, keyboard = go_back(menu_state)
     
     if next_menu:
         await state.set_state(next_menu)
