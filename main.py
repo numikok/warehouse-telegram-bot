@@ -495,57 +495,56 @@ async def button_china_order(message: Message, state: FSMContext):
 @dp.message(F.text == "◀️ Назад")
 async def button_back(message: Message, state: FSMContext):
     """Обработчик кнопки Назад для возврата в предыдущее меню."""
-    current_state = await state.get_state()
-    if not current_state:
-        current_state = MenuState.MAIN
-        
-    # Пытаемся получить состояние меню из MenuState
+    # Определяем роль пользователя
+    db = next(get_db())
     try:
-        menu_state = MenuState(current_state)
-    except ValueError:
-        # Если текущее состояние не является состоянием меню, используем default
-        if hasattr(current_state, "__class__"):
-            # Определяем роль пользователя
-            db = next(get_db())
-            try:
-                user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
-                if not user:
-                    await message.answer("Не удалось определить вашу роль. Пожалуйста, начните сначала с /start", parse_mode="Markdown")
-                    return
-                    
-                main_menu_state = get_main_menu_state_for_role(user.role)
-                next_menu, keyboard = go_back(main_menu_state)
-                
-                await state.set_state(next_menu)
-                await message.answer("Вы вернулись в главное меню.", reply_markup=keyboard, parse_mode="Markdown")
-            finally:
-                db.close()
-            return
-        else:
-            # Если не можем определить состояние, возвращаемся в главное меню
-            db = next(get_db())
-            try:
-                user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
-                if not user:
-                    await message.answer("Не удалось определить вашу роль. Пожалуйста, начните сначала с /start", parse_mode="Markdown")
-                    return
-                    
-                main_menu_state = get_main_menu_state_for_role(user.role)
-                next_menu, keyboard = get_menu_keyboard(main_menu_state)
-                
-                await state.set_state(next_menu)
-                await message.answer("Вы вернулись в главное меню.", reply_markup=keyboard, parse_mode="Markdown")
-            finally:
-                db.close()
+        user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
+        if not user:
+            await message.answer("Не удалось определить вашу роль. Пожалуйста, начните сначала с /start", parse_mode="Markdown")
             return
             
-    next_menu, keyboard = go_back(menu_state)
-    
-    if next_menu:
-        await state.set_state(next_menu)
-        await message.answer("Вы вернулись в предыдущее меню.", reply_markup=keyboard, parse_mode="Markdown")
-    else:
-        await message.answer("Вы уже находитесь в главном меню.", reply_markup=keyboard, parse_mode="Markdown")
+        current_state = await state.get_state()
+        if not current_state:
+            # Если текущее состояние не определено, возвращаемся в главное меню для роли
+            main_menu_state = get_main_menu_state_for_role(user.role)
+            await state.set_state(main_menu_state)
+            await message.answer(
+                "Вы вернулись в главное меню.",
+                reply_markup=get_menu_keyboard(main_menu_state),
+                parse_mode="Markdown"
+            )
+            return
+            
+        # Пытаемся получить состояние меню из MenuState
+        try:
+            menu_state = MenuState(current_state)
+            # Используем функцию go_back с параметром роли
+            next_menu, keyboard = await go_back(state, user.role)
+            
+            if next_menu:
+                await state.set_state(next_menu)
+                await message.answer("Вы вернулись в предыдущее меню.", reply_markup=keyboard, parse_mode="Markdown")
+            else:
+                # Если next_menu None, значит мы уже в главном меню или произошла ошибка
+                main_menu_state = get_main_menu_state_for_role(user.role)
+                await state.set_state(main_menu_state)
+                await message.answer(
+                    "Вы вернулись в главное меню.",
+                    reply_markup=get_menu_keyboard(main_menu_state),
+                    parse_mode="Markdown"
+                )
+                
+        except ValueError:
+            # Если текущее состояние не является MenuState, возвращаемся в главное меню роли
+            main_menu_state = get_main_menu_state_for_role(user.role)
+            await state.set_state(main_menu_state)
+            await message.answer(
+                "Вы вернулись в главное меню.",
+                reply_markup=get_menu_keyboard(main_menu_state),
+                parse_mode="Markdown"
+            )
+    finally:
+        db.close()
 
 @dp.message(F.text == "📦 Остатки материалов")
 async def button_materials_report(message: Message, state: FSMContext):
