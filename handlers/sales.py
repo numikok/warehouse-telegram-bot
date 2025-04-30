@@ -853,76 +853,106 @@ async def process_order_confirmation(message: Message, state: FSMContext):
     
     db = next(get_db())
     try:
-        # Проверяем существование пользователя в базе
-        manager = db.query(User).filter(User.telegram_id == user_id).first()
-        if not manager:
-            await message.answer("⚠️ Произошла ошибка: ваш аккаунт не найден в системе.")
-            return
-            
-        # Создаем заказ (всегда со статусом NEW)
-        order = Order(
-            customer_name=data.get("customer_name", ""),
-            customer_phone=data.get("customer_phone", ""),
-            delivery_address=data.get("delivery_address", ""),
-            shipment_date=data.get("shipment_date"),
-            payment_method=data.get("payment_method", ""),
-            status=OrderStatus.NEW,
-            created_at=datetime.now(),
-            need_installation=data.get("need_installation", False),
-            manager_id=manager.id
-        )
-        
-        db.add(order)
-        db.flush()  # Получаем id заказа
-        
-        # Добавляем продукты к заказу
-        products = data.get("products", [])
-        for product in products:
-            order_product = OrderProduct(
-                order_id=order.id,
-                product_id=product["id"],
-                quantity=product["quantity"]
+        # Получаем пользователя
+        user = db.query(User).filter(User.telegram_id == user_id).first()
+        if not user:
+            await message.answer(
+                "❌ Ошибка: Пользователь не найден в системе!",
+                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
             )
-            db.add(order_product)
-            
-        # Добавляем стыки, если они есть
-        joints = data.get("joints", [])
-        for joint in joints:
+            await state.set_state(MenuState.SALES_MAIN)
+            return
+        
+        # Получаем данные заказа из состояния
+        selected_products = data.get('selected_products', [])
+        selected_joints = data.get('selected_joints', [])
+        glue_quantity = data.get('glue_quantity', 0)
+        installation_required = data.get('installation_required', False)
+        customer_phone = data.get('customer_phone', '')
+        delivery_address = data.get('delivery_address', '')
+        payment_method = data.get('payment_method', '')
+        shipment_date_str = data.get('shipment_date', None)
+        
+        # Конвертируем строку даты в объект date, если есть
+        shipment_date = None
+        if shipment_date_str:
+            # Проверяем, является ли shipment_date_str уже объектом datetime.date
+            if isinstance(shipment_date_str, date):
+                shipment_date = shipment_date_str
+            else:
+                try:
+                    shipment_date = datetime.strptime(shipment_date_str, "%d.%m.%Y").date()
+                except ValueError:
+                    logging.warning(f"Неверный формат даты: {shipment_date_str}")
+        
+        # Создаем новый заказ
+        new_order = Order(
+            manager_id=user.id,
+            status=OrderStatus.NEW,
+            installation_required=installation_required,
+            customer_phone=customer_phone,
+            delivery_address=delivery_address,
+            shipment_date=shipment_date,
+            payment_method=payment_method
+        )
+        db.add(new_order)
+        db.flush()  # Получаем ID заказа
+        
+        # Добавляем товары в заказ
+        for product in selected_products:
+            order_item = OrderItem(
+                order_id=new_order.id,
+                color=product['film_code'],
+                thickness=float(product['thickness']),
+                quantity=int(product['quantity'])
+            )
+            db.add(order_item)
+        
+        # Добавляем стыки в заказ, если есть
+        for joint in selected_joints:
+            joint_type_enum = None
+            if joint.get('type').lower() == 'butterfly':
+                joint_type_enum = JointType.BUTTERFLY
+            elif joint.get('type').lower() == 'closing':
+                joint_type_enum = JointType.CLOSING
+            else:
+                joint_type_enum = JointType.SIMPLE
+                
             order_joint = OrderJoint(
-                order_id=order.id,
-                joint_type=joint["type"],
-                color=joint["color"],
-                thickness=joint.get("thickness", ""),
-                quantity=joint["quantity"]
+                order_id=new_order.id,
+                joint_type=joint_type_enum,
+                joint_color=joint.get('color', ''),
+                joint_quantity=int(joint.get('quantity', 0)),
+                joint_thickness=float(joint.get('thickness', 0.5))
             )
             db.add(order_joint)
-            
-        # Добавляем клей, если он есть
-        glue_needed = data.get("glue_needed", False)
-        if glue_needed:
-            glue_quantity = data.get("glue_quantity", 0)
+        
+        # Добавляем клей в заказ, если указан
+        if glue_quantity > 0:
             order_glue = OrderGlue(
-                order_id=order.id,
+                order_id=new_order.id,
                 quantity=glue_quantity
             )
             db.add(order_glue)
-            
+        
+        # Сохраняем все изменения
         db.commit()
         
-        success_message = f"✅ Заказ #{order.id} успешно создан!"
-        
-        await state.clear()
+        # Отправляем сообщение об успешном создании заказа
         await message.answer(
-            success_message,
+            f"✅ Заказ #{new_order.id} успешно создан!",
             reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
         )
+        
+        # Сбрасываем состояние
+        await state.clear()
         await state.set_state(MenuState.SALES_MAIN)
         
     except Exception as e:
         db.rollback()
-        logger.error(f"Ошибка при создании заказа: {e}")
+        logging.error(f"Ошибка при создании заказа: {str(e)}", exc_info=True)
         await message.answer(
-            f"⚠️ Произошла ошибка при создании заказа: {e}",
+            f"❌ Произошла ошибка при создании заказа: {str(e)}",
             reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
         )
         await state.set_state(MenuState.SALES_MAIN)
