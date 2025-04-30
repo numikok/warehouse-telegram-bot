@@ -876,10 +876,14 @@ async def process_order_confirmation(message: Message, state: FSMContext):
         # Конвертируем строку даты в объект date, если есть
         shipment_date = None
         if shipment_date_str:
-            try:
-                shipment_date = datetime.strptime(shipment_date_str, "%d.%m.%Y").date()
-            except ValueError:
-                logging.warning(f"Неверный формат даты: {shipment_date_str}")
+            # Проверяем, является ли shipment_date_str уже объектом datetime.date
+            if isinstance(shipment_date_str, datetime.date):
+                shipment_date = shipment_date_str
+            else:
+                try:
+                    shipment_date = datetime.strptime(shipment_date_str, "%d.%m.%Y").date()
+                except ValueError:
+                    logging.warning(f"Неверный формат даты: {shipment_date_str}")
         
         # Определяем статус заказа в зависимости от выбора пользователя
         status = "new" if message.text == "✅ Оформить заказ" else "reserved"
@@ -2559,7 +2563,19 @@ async def process_reserve_order(message: Message, state: FSMContext):
         customer_phone = data.get('customer_phone', '')
         delivery_address = data.get('delivery_address', '')
         payment_method = data.get('payment_method', '')
-        shipment_date = data.get('shipment_date', None)
+        shipment_date_str = data.get('shipment_date', None)
+        
+        # Конвертируем строку даты в объект date, если есть
+        shipment_date = None
+        if shipment_date_str:
+            # Проверяем, является ли shipment_date_str уже объектом datetime.date
+            if isinstance(shipment_date_str, datetime.date):
+                shipment_date = shipment_date_str
+            else:
+                try:
+                    shipment_date = datetime.strptime(shipment_date_str, "%d.%m.%Y").date()
+                except ValueError:
+                    logging.warning(f"Неверный формат даты: {shipment_date_str}")
         
         # Проверяем наличие выбранных продуктов
         if not selected_products:
@@ -2589,25 +2605,27 @@ async def process_reserve_order(message: Message, state: FSMContext):
             order_item = OrderItem(
                 order_id=new_order.id,
                 color=product['film_code'],
-                thickness=product['thickness'],
-                quantity=product['quantity']
+                thickness=float(product['thickness']),
+                quantity=int(product['quantity'])
             )
             db.add(order_item)
         
         # Создаем записи о стыках
         for joint in selected_joints:
-            joint_type_value = JointType.SIMPLE.value
-            if joint.get('type') == 'butterfly':
-                joint_type_value = JointType.BUTTERFLY.value
-            elif joint.get('type') == 'closing':
-                joint_type_value = JointType.CLOSING.value
+            joint_type_enum = None
+            if joint.get('type').lower() == 'butterfly':
+                joint_type_enum = JointType.BUTTERFLY
+            elif joint.get('type').lower() == 'closing':
+                joint_type_enum = JointType.CLOSING
+            else:
+                joint_type_enum = JointType.SIMPLE
             
             order_joint = OrderJoint(
                 order_id=new_order.id,
-                joint_type=joint_type_value,
-                joint_thickness=joint.get('thickness', ''),
+                joint_type=joint_type_enum,
                 joint_color=joint.get('color', ''),
-                quantity=joint.get('quantity', 0)
+                joint_quantity=int(joint.get('quantity', 0)),
+                joint_thickness=float(joint.get('thickness', 0.5))
             )
             db.add(order_joint)
         
