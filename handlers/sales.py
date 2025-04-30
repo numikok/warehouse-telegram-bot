@@ -2827,12 +2827,24 @@ async def handle_booking(message: Message, state: FSMContext):
                 
             response += "   ---\n"
         
-        response += "\nВведите номер заказа, который хотите забронировать:"
+        response += "\nВыберите номер заказа, который хотите забронировать:"
+        
+        # Создаем клавиатуру с кнопками для каждого доступного заказа
+        keyboard_rows = []
+        current_row = []
+        for i, order in enumerate(available_orders):
+            current_row.append(KeyboardButton(text=str(order.id)))
+            # По 3 кнопки в ряд
+            if len(current_row) == 3 or i == len(available_orders) - 1:
+                keyboard_rows.append(current_row)
+                current_row = []
+                
+        keyboard_rows.append([KeyboardButton(text="◀️ Назад")])
         
         await message.answer(
             response,
             reply_markup=ReplyKeyboardMarkup(
-                keyboard=[[KeyboardButton(text="◀️ Назад")]],
+                keyboard=keyboard_rows,
                 resize_keyboard=True
             )
         )
@@ -2841,7 +2853,7 @@ async def handle_booking(message: Message, state: FSMContext):
         await state.set_state(SalesStates.waiting_for_booking_order_selection)
         
     except Exception as e:
-        logger.error(f"Ошибка при получении списка заказов для бронирования: {e}")
+        logging.error(f"Ошибка при получении списка заказов для бронирования: {e}")
         await message.answer(
             f"⚠️ Произошла ошибка при получении списка заказов: {e}",
             reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
@@ -2864,13 +2876,12 @@ async def process_booking_order_selection(message: Message, state: FSMContext):
         
         # Проверяем существование заказа и его статус
         order = db.query(Order).filter(
-            Order.id == order_id,
-            Order.manager_id == user.id  # Только заказы этого менеджера
+            Order.id == order_id
         ).first()
         
         if not order:
             await message.answer(
-                f"❌ Заказ #{order_id} не найден или не принадлежит вам.",
+                f"❌ Заказ #{order_id} не найден.",
                 reply_markup=ReplyKeyboardMarkup(
                     keyboard=[[KeyboardButton(text="◀️ Назад")]],
                     resize_keyboard=True
@@ -2889,7 +2900,7 @@ async def process_booking_order_selection(message: Message, state: FSMContext):
                 )
             else:
                 await message.answer(
-                    f"⚠️ Заказ #{order_id} имеет статус '{order.status}' и не может быть забронирован.",
+                    f"⚠️ Заказ #{order_id} имеет статус '{order.status.value}' и не может быть забронирован.",
                     reply_markup=ReplyKeyboardMarkup(
                         keyboard=[[KeyboardButton(text="◀️ Назад")]],
                         resize_keyboard=True
@@ -2908,30 +2919,25 @@ async def process_booking_order_selection(message: Message, state: FSMContext):
             order_details += f"🚚 Адрес доставки: {order.delivery_address}\n"
         if order.shipment_date:
             order_details += f"📆 Дата отгрузки: {order.shipment_date.strftime('%d.%m.%Y')}\n"
-        order_details += f"🔧 Монтаж: {'Требуется' if order.need_installation else 'Не требуется'}\n"
+        order_details += f"🔧 Монтаж: {'Требуется' if order.installation_required else 'Не требуется'}\n"
         
         # Продукты в заказе
-        order_products = db.query(OrderProduct).filter(OrderProduct.order_id == order.id).all()
-        if order_products:
+        if order.products:
             order_details += "\n📦 Товары в заказе:\n"
-            for i, product in enumerate(order_products, 1):
-                product_info = db.query(Product).filter(Product.id == product.product_id).first()
-                if product_info:
-                    order_details += f"  {i}. {product_info.name}, количество: {product.quantity}\n"
-                else:
-                    order_details += f"  {i}. Продукт ID: {product.product_id}, количество: {product.quantity}\n"
+            for i, product in enumerate(order.products, 1):
+                order_details += f"  {i}. {product.color} ({product.thickness} мм), количество: {product.quantity} шт.\n"
         
         # Стыки в заказе
-        order_joints = db.query(OrderJoint).filter(OrderJoint.order_id == order.id).all()
-        if order_joints:
+        if order.joints:
             order_details += "\n🔄 Стыки в заказе:\n"
-            for i, joint in enumerate(order_joints, 1):
-                order_details += f"  {i}. Тип: {joint.joint_type}, цвет: {joint.color}, толщина: {joint.thickness}, количество: {joint.quantity}\n"
+            for i, joint in enumerate(order.joints, 1):
+                joint_type_name = "Бабочка" if joint.joint_type == JointType.BUTTERFLY else "Простой" if joint.joint_type == JointType.SIMPLE else "Замыкающий"
+                order_details += f"  {i}. Тип: {joint_type_name}, цвет: {joint.joint_color}, толщина: {joint.joint_thickness} мм, количество: {joint.quantity} шт.\n"
         
         # Клей в заказе
-        order_glue = db.query(OrderGlue).filter(OrderGlue.order_id == order.id).first()
-        if order_glue:
-            order_details += f"\n🧴 Клей: {order_glue.quantity} тюбиков\n"
+        if order.glues:
+            total_glue = sum(glue.quantity for glue in order.glues)
+            order_details += f"\n🧴 Клей: {total_glue} шт.\n"
         
         order_details += "\nВы уверены, что хотите забронировать этот заказ?"
         
@@ -2955,7 +2961,7 @@ async def process_booking_order_selection(message: Message, state: FSMContext):
         await state.set_state(SalesStates.waiting_for_booking_confirmation)
         
     except Exception as e:
-        logger.error(f"Ошибка при выборе заказа для бронирования: {e}")
+        logging.error(f"Ошибка при выборе заказа для бронирования: {e}")
         await message.answer(
             f"⚠️ Произошла ошибка при выборе заказа: {e}",
             reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
@@ -3155,14 +3161,29 @@ async def handle_reserved_orders(message: Message, state: FSMContext):
                 response += f"Адрес: {order.delivery_address}\n"
             response += "\n---\n"
         
-        response += "\nВведите ID заказа для просмотра деталей и управления."
+        response += "\nВыберите ID заказа для просмотра деталей и управления."
         
         if len(response) > 4000:
             response = response[:4000] + "\n... (список слишком длинный)"
         
+        # Создаем клавиатуру с кнопками для каждого забронированного заказа
+        keyboard_rows = []
+        current_row = []
+        for i, order in enumerate(reserved_orders):
+            current_row.append(KeyboardButton(text=str(order.id)))
+            # По 3 кнопки в ряд
+            if len(current_row) == 3 or i == len(reserved_orders) - 1:
+                keyboard_rows.append(current_row)
+                current_row = []
+                
+        keyboard_rows.append([KeyboardButton(text="◀️ Назад")])
+        
         await message.answer(
             response,
-            reply_markup=get_menu_keyboard(MenuState.SALES_RESERVED_ORDERS)
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=keyboard_rows,
+                resize_keyboard=True
+            )
         )
         
     except Exception as e:
