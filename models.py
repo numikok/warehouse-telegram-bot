@@ -323,29 +323,31 @@ class CompletedOrder(Base):
             "status": self.status
         } 
 
-class OrderProduct(Base):
-    __tablename__ = "order_products"
+# Commented out because they reference a non-existent "products" table
+# and conflict with existing relationship between Order and OrderItem
+#class OrderProduct(Base):
+#    __tablename__ = "order_products"
+#
+#    id = Column(Integer, primary_key=True, index=True)
+#    order_id = Column(Integer, ForeignKey("orders.id", ondelete="CASCADE"))
+#    product_id = Column(Integer, ForeignKey("products.id"))
+#    quantity = Column(Integer)
+#    created_at = Column(DateTime, default=datetime.utcnow)
+#    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+#
+#    order = relationship("Order", back_populates="products")
+#    product = relationship("Product")
 
-    id = Column(Integer, primary_key=True, index=True)
-    order_id = Column(Integer, ForeignKey("orders.id", ondelete="CASCADE"))
-    product_id = Column(Integer, ForeignKey("products.id"))
-    quantity = Column(Integer)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    order = relationship("Order", back_populates="products")
-    product = relationship("Product")
-
-
-class StockReservation(Base):
-    __tablename__ = "stock_reservations"
-
-    id = Column(Integer, primary_key=True, index=True)
-    order_id = Column(Integer, ForeignKey("orders.id", ondelete="CASCADE"))
-    product_id = Column(Integer, ForeignKey("products.id"))
-    quantity = Column(Integer)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    order = relationship("Order")
-    product = relationship("Product") 
+#class StockReservation(Base):
+#    __tablename__ = "stock_reservations"
+#
+#    id = Column(Integer, primary_key=True, index=True)
+#    order_id = Column(Integer, ForeignKey("orders.id", ondelete="CASCADE"))
+#    product_id = Column(Integer, ForeignKey("products.id"))
+#    quantity = Column(Integer)
+#    created_at = Column(DateTime, default=datetime.utcnow)
+#    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+#
+#    order = relationship("Order")
+#    product = relationship("Product") 
