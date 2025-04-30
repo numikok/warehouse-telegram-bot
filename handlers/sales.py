@@ -832,7 +832,7 @@ async def process_order_confirmation(message: Message, state: FSMContext):
     """Обработка подтверждения заказа с новыми полями"""
     response = message.text.strip()
     
-    if response == "✅ Подтвердить":
+    if response == "✅ Оформить заказ":
         data = await state.get_data()
         selected_products = data.get("selected_products", [])
         selected_joints = data.get("selected_joints", [])
@@ -994,8 +994,131 @@ async def process_order_confirmation(message: Message, state: FSMContext):
             await state.clear() # Очищаем состояние при ошибке
         finally:
             db.close()
+    
+    elif response == "🔖 Бронировать":
+        data = await state.get_data()
+        selected_products = data.get("selected_products", [])
+        selected_joints = data.get("selected_joints", [])
+        customer_phone = data.get("customer_phone", "")
+        delivery_address = data.get("delivery_address", "")
+        installation_required = data.get("installation_required", False)
+        glue_quantity = data.get("glue_quantity", 0)
+        shipment_date = data.get("shipment_date")
+        payment_method = data.get("payment_method")
+        telegram_id = message.from_user.id
+        
+        db = next(get_db())
+        try:
+            user = db.query(User).filter(User.telegram_id == telegram_id).first()
+            if not user:
+                logging.error(f"User with telegram_id={telegram_id} not found.")
+                await message.answer("❌ Ошибка: Ваш пользователь не найден.", reply_markup=get_menu_keyboard(MenuState.SALES_MAIN))
+                await state.clear()
+                return
             
-    elif response == "❌ Отменить":
+            manager_db_id = user.id
+            
+            # Создаем заказ со статусом RESERVED
+            order = Order(
+                manager_id=manager_db_id,
+                customer_phone=customer_phone,
+                delivery_address=delivery_address,
+                installation_required=installation_required,
+                shipment_date=shipment_date, 
+                payment_method=payment_method,
+                status=OrderStatus.RESERVED
+            )
+            db.add(order)
+            db.flush()
+            
+            # Добавляем продукты в заказ
+            total_panels = 0
+            for product in selected_products:
+                film_code = product['film_code']
+                thickness = float(product['thickness'])
+                qty = product['quantity']
+                total_panels += qty
+                
+                film = db.query(Film).filter(Film.code == film_code).first()
+                if not film:
+                    continue
+                
+                order_item = OrderItem(
+                    order_id=order.id,
+                    quantity=qty,
+                    color=product['film_code'],
+                    thickness=product['thickness']
+                )
+                db.add(order_item)
+            
+            # Если нужны стыки, добавляем их в заказ
+            need_joints = len(selected_joints) > 0
+            if need_joints and selected_joints:
+                for joint in selected_joints:
+                    joint_type_val = joint.get('type')
+                    thickness = float(joint.get('thickness'))
+                    color = joint.get('color')
+                    joint_qty = joint.get('quantity')
+                    
+                    # Преобразуем строковое значение типа стыка обратно в enum
+                    joint_type_enum = None
+                    if joint_type_val == "butterfly": joint_type_enum = JointType.BUTTERFLY
+                    elif joint_type_val == "simple": joint_type_enum = JointType.SIMPLE
+                    elif joint_type_val == "closing": joint_type_enum = JointType.CLOSING
+                        
+                    if not joint_type_enum: continue
+                    
+                    # Создаем связь между заказом и стыком
+                    order_joint = OrderJoint(
+                        order_id=order.id,
+                        joint_type=joint_type_enum,
+                        joint_color=color,
+                        joint_quantity=joint_qty,
+                        joint_thickness=thickness
+                    )
+                    db.add(order_joint)
+            
+            # Если указано количество клея, добавляем в заказ
+            if glue_quantity > 0:
+                order_glue = OrderGlue(
+                    order_id=order.id,
+                    quantity=glue_quantity
+                )
+                db.add(order_glue)
+            
+            db.commit()
+            
+            # Формируем итоговое сообщение для забронированного заказа
+            products_info = "Продукция:\n" + "\n".join([f"▪️ {p['film_code']} ({p['thickness']} мм): {p['quantity']} шт." for p in selected_products]) if selected_products else ""
+            joints_info = ""
+            if need_joints and selected_joints:
+                joints_info = "\nСтыки:\n" + "\n".join([f"▪️ Тип: {j.get('type', '')}, {j.get('thickness', '')} мм, {j.get('color', '')}: {j.get('quantity', 0)} шт." for j in selected_joints])
+            
+            shipment_date_str = shipment_date.strftime('%d.%m.%Y') if shipment_date else 'Не указана'
+            
+            confirmation_message = (
+                f"🔖 Заказ #{order.id} успешно забронирован!\n\n"
+                f"{products_info}\n"
+                f"{joints_info}\n"
+                f"\n🧴 Клей: {glue_quantity} тюбиков\n"
+                f"🔧 Монтаж: {'Требуется' if installation_required else 'Не требуется'}\n"
+                f"📞 Контактный телефон: {customer_phone}\n"
+                f"🚚 Адрес доставки: {delivery_address}\n"
+                f"🗓 Дата отгрузки: {shipment_date_str}\n"
+                f"💳 Способ оплаты: {payment_method}\n"
+            )
+            
+            await state.clear() # Очищаем состояние после успешного создания
+            await message.answer(confirmation_message, reply_markup=get_menu_keyboard(MenuState.SALES_MAIN))
+        except Exception as e:
+            db.rollback()
+            logging.error(f"Error creating reserved order: {e}", exc_info=True)
+            await message.answer(f"❌ Произошла ошибка при бронировании заказа: {e}", reply_markup=get_menu_keyboard(MenuState.SALES_MAIN))
+            await state.clear() # Очищаем состояние при ошибке
+        finally:
+            db.close()
+            
+    elif response == "❌ Отменить заказ":
         await state.clear()
         await message.answer("Заказ отменен.", reply_markup=get_menu_keyboard(MenuState.SALES_MAIN))
     elif response == "◀️ Назад":
@@ -1012,7 +1135,8 @@ async def process_order_confirmation(message: Message, state: FSMContext):
         await message.answer("Выберите способ оплаты:", reply_markup=keyboard)
         await state.set_state(SalesStates.waiting_for_payment_method)
     else:
-        await message.answer("Пожалуйста, выберите один из вариантов: ✅ Подтвердить, ❌ Отменить или ◀️ Назад", reply_markup=get_menu_keyboard(MenuState.SALES_ORDER_CONFIRM))
+        # Если не один из стандартных вариантов ответа, напоминаем о доступных опциях
+        await message.answer("Пожалуйста, выберите один из вариантов: ✅ Оформить заказ, 🔖 Бронировать, ❌ Отменить заказ или ◀️ Назад", reply_markup=get_menu_keyboard(MenuState.SALES_ORDER_CONFIRM))
 
 @router.message(F.text == "🔙 Назад в админку")
 async def handle_back_to_admin(message: Message, state: FSMContext):
@@ -2580,5 +2704,387 @@ async def view_completed_order_sales(message: Message, state: FSMContext):
     except Exception as e:
         logging.error(f"(Sales) Ошибка при просмотре завершенного заказа {completed_order_id}: {e}", exc_info=True)
         await message.answer("Произошла ошибка при загрузке деталей заказа.", reply_markup=get_menu_keyboard(MenuState.SALES_COMPLETED_ORDERS))
+    finally:
+        db.close()
+
+@router.message(F.text == "🔖 Бронировать", StateFilter(SalesStates.waiting_for_order_confirmation))
+async def process_reserve_order(message: Message, state: FSMContext):
+    """Обработка бронирования заказа"""
+    user_id = message.from_user.id
+    data = await state.get_data()
+    
+    db = next(get_db())
+    try:
+        # Получаем пользователя
+        user = db.query(User).filter(User.telegram_id == user_id).first()
+        if not user:
+            await message.answer(
+                "❌ Ошибка: Пользователь не найден в системе!",
+                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+            )
+            await state.set_state(MenuState.SALES_MAIN)
+            return
+        
+        # Получаем данные заказа
+        selected_products = data.get('selected_products', [])
+        selected_joints = data.get('selected_joints', [])
+        glue_quantity = data.get('glue_quantity', 0)
+        installation_required = data.get('installation_required', False)
+        customer_phone = data.get('customer_phone', '')
+        delivery_address = data.get('delivery_address', '')
+        payment_method = data.get('payment_method', '')
+        shipment_date = data.get('shipment_date', None)
+        
+        # Проверяем наличие выбранных продуктов
+        if not selected_products:
+            await message.answer(
+                "❌ Ошибка: Заказ не содержит продуктов!",
+                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+            )
+            await state.set_state(MenuState.SALES_MAIN)
+            return
+        
+        # Создаем запись о бронировании
+        new_order = Order(
+            manager_id=user.id,
+            status=OrderStatus.RESERVED.value,  # Устанавливаем статус RESERVED
+            customer_phone=customer_phone,
+            delivery_address=delivery_address,
+            installation_required=installation_required,
+            created_at=datetime.now(),
+            payment_method=payment_method,
+            shipment_date=shipment_date
+        )
+        db.add(new_order)
+        db.flush()  # Получаем ID нового заказа
+        
+        # Создаем записи о продуктах
+        for product in selected_products:
+            order_item = OrderItem(
+                order_id=new_order.id,
+                color=product['film_code'],
+                thickness=product['thickness'],
+                quantity=product['quantity']
+            )
+            db.add(order_item)
+        
+        # Создаем записи о стыках
+        for joint in selected_joints:
+            joint_type_value = JointType.SIMPLE.value
+            if joint.get('type') == 'butterfly':
+                joint_type_value = JointType.BUTTERFLY.value
+            elif joint.get('type') == 'closing':
+                joint_type_value = JointType.CLOSING.value
+            
+            order_joint = OrderJoint(
+                order_id=new_order.id,
+                joint_type=joint_type_value,
+                joint_thickness=joint.get('thickness', ''),
+                joint_color=joint.get('color', ''),
+                quantity=joint.get('quantity', 0)
+            )
+            db.add(order_joint)
+        
+        # Создаем запись о клее, если требуется
+        if glue_quantity > 0:
+            order_glue = OrderGlue(
+                order_id=new_order.id,
+                quantity=glue_quantity
+            )
+            db.add(order_glue)
+        
+        # Сохраняем изменения в БД
+        db.commit()
+        
+        # Отправляем сообщение о успешном бронировании
+        await message.answer(
+            f"✅ Заказ успешно забронирован!\n\n"
+            f"Номер заказа: #{new_order.id}\n"
+            f"Статус: Забронирован\n"
+            f"Для управления заказом используйте раздел 'Забронированные заказы'",
+            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+        )
+        await state.set_state(MenuState.SALES_MAIN)
+        
+    except Exception as e:
+        db.rollback()
+        logging.error(f"Ошибка при бронировании заказа: {e}", exc_info=True)
+        await message.answer(
+            f"❌ Произошла ошибка при бронировании заказа: {str(e)}",
+            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+        )
+        await state.set_state(MenuState.SALES_MAIN)
+    finally:
+        db.close()
+
+@router.message(F.text == "🔖 Забронированные заказы", StateFilter(MenuState.SALES_MAIN))
+async def handle_reserved_orders_sales(message: Message, state: FSMContext):
+    """Отображает список забронированных заказов"""
+    if not await check_sales_access(message):
+        return
+    
+    await state.set_state(MenuState.SALES_RESERVED_ORDERS)
+    db = next(get_db())
+    try:
+        user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
+        if not user:
+            await message.answer("Ошибка: пользователь не найден.")
+            return
+        
+        # Получаем забронированные заказы этого менеджера
+        reserved_orders = db.query(Order).filter(
+            Order.status == OrderStatus.RESERVED.value,
+            Order.manager_id == user.id
+        ).order_by(desc(Order.created_at)).all()
+        
+        if not reserved_orders:
+            await message.answer(
+                "У вас нет забронированных заказов.",
+                reply_markup=get_menu_keyboard(MenuState.SALES_RESERVED_ORDERS)
+            )
+            return
+        
+        response = "🔖 Ваши забронированные заказы:\n\n"
+        for order in reserved_orders:
+            response += f"Заказ #{order.id}\n"
+            response += f"Дата создания: {order.created_at.strftime('%Y-%m-%d %H:%M')}\n"
+            response += f"Клиент: {order.customer_phone}\n"
+            response += f"Адрес: {order.delivery_address}\n"
+            response += "\n---\n"
+        
+        response += "\nВведите ID заказа для просмотра деталей и управления."
+        
+        if len(response) > 4000:
+            response = response[:4000] + "\n... (список слишком длинный)"
+        
+        await message.answer(
+            response,
+            reply_markup=get_menu_keyboard(MenuState.SALES_RESERVED_ORDERS)
+        )
+        
+    except Exception as e:
+        logging.error(f"Ошибка при получении забронированных заказов: {e}", exc_info=True)
+        await message.answer(
+            "Произошла ошибка при загрузке забронированных заказов.",
+            reply_markup=get_menu_keyboard(MenuState.SALES_RESERVED_ORDERS)
+        )
+    finally:
+        db.close()
+
+@router.message(StateFilter(MenuState.SALES_RESERVED_ORDERS), F.text.regexp(r'^\d+$'))
+async def view_reserved_order_sales(message: Message, state: FSMContext):
+    """Отображает детали одного забронированного заказа"""
+    if not await check_sales_access(message):
+        return
+    
+    try:
+        order_id = int(message.text)
+    except ValueError:
+        await message.answer(
+            "Пожалуйста, введите корректный числовой ID.",
+            reply_markup=get_menu_keyboard(MenuState.SALES_RESERVED_ORDERS)
+        )
+        return
+    
+    db = next(get_db())
+    try:
+        order = db.query(Order).options(
+            joinedload(Order.items),
+            joinedload(Order.joints),
+            joinedload(Order.glues)
+        ).filter(
+            Order.id == order_id,
+            Order.status == OrderStatus.RESERVED.value
+        ).first()
+        
+        if not order:
+            await message.answer(
+                f"Забронированный заказ с ID {order_id} не найден или не имеет статус 'Забронирован'.",
+                reply_markup=get_menu_keyboard(MenuState.SALES_RESERVED_ORDERS)
+            )
+            return
+        
+        # Проверяем, принадлежит ли заказ этому менеджеру
+        user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
+        if order.manager_id != user.id and user.role != UserRole.SUPER_ADMIN.value:
+            await message.answer(
+                "У вас нет доступа к этому заказу.",
+                reply_markup=get_menu_keyboard(MenuState.SALES_RESERVED_ORDERS)
+            )
+            return
+        
+        # Формируем ответ с деталями заказа
+        response = f"🔖 Детали забронированного заказа #{order.id}\n\n"
+        response += f"Дата создания: {order.created_at.strftime('%Y-%m-%d %H:%M')}\n"
+        response += f"Клиент: {order.customer_phone}\n"
+        response += f"Адрес: {order.delivery_address}\n"
+        shipment_date_str = order.shipment_date.strftime('%d.%m.%Y') if order.shipment_date else 'Не указана'
+        payment_method_str = order.payment_method if order.payment_method else 'Не указан'
+        response += f"🗓 Дата отгрузки: {shipment_date_str}\n"
+        response += f"💳 Способ оплаты: {payment_method_str}\n"
+        response += f"Монтаж: {'Да' if order.installation_required else 'Нет'}\n\n"
+        
+        response += "📦 Продукция:\n"
+        if order.items:
+            for item in order.items:
+                response += f"- {item.color} ({item.thickness} мм): {item.quantity} шт.\n"
+        else:
+            response += "- нет\n"
+        
+        response += "\n🔗 Стыки:\n"
+        if order.joints:
+            for joint in order.joints:
+                joint_type_name = "Другой"
+                if joint.joint_type == JointType.SIMPLE.value:
+                    joint_type_name = "Простой"
+                elif joint.joint_type == JointType.BUTTERFLY.value:
+                    joint_type_name = "Бабочка"
+                elif joint.joint_type == JointType.CLOSING.value:
+                    joint_type_name = "Замыкающий"
+                
+                response += f"- {joint_type_name} ({joint.joint_thickness} мм, {joint.joint_color}): {joint.quantity} шт.\n"
+        else:
+            response += "- нет\n"
+        
+        response += "\n🧴 Клей:\n"
+        if order.glues:
+            for glue in order.glues:
+                response += f"- {glue.quantity} шт.\n"
+        else:
+            response += "- нет\n"
+        
+        # Создаем инлайн клавиатуру для управления заказом
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Оформить заказ", callback_data=f"confirm_reserved:{order.id}"),
+                InlineKeyboardButton(text="❌ Отменить бронь", callback_data=f"cancel_reserved:{order.id}")
+            ]
+        ])
+        
+        # Устанавливаем состояние и сохраняем ID просматриваемого заказа
+        await state.set_state(MenuState.SALES_VIEW_RESERVED_ORDER)
+        await state.update_data(viewed_reserved_order_id=order.id)
+        
+        await message.answer(
+            response,
+            reply_markup=keyboard
+        )
+        
+    except Exception as e:
+        logging.error(f"Ошибка при просмотре забронированного заказа {order_id}: {e}", exc_info=True)
+        await message.answer(
+            "Произошла ошибка при загрузке деталей заказа.",
+            reply_markup=get_menu_keyboard(MenuState.SALES_RESERVED_ORDERS)
+        )
+    finally:
+        db.close()
+
+@router.callback_query(lambda c: c.data.startswith("confirm_reserved:"))
+async def process_confirm_reserved_order(callback_query: CallbackQuery, state: FSMContext):
+    """Обработка подтверждения забронированного заказа"""
+    await callback_query.answer()
+    
+    # Извлекаем ID заказа из callback_data
+    order_id = int(callback_query.data.split(":")[1])
+    
+    db = next(get_db())
+    try:
+        # Получаем заказ
+        order = db.query(Order).filter(
+            Order.id == order_id,
+            Order.status == OrderStatus.RESERVED.value
+        ).first()
+        
+        if not order:
+            await callback_query.message.answer(
+                "Заказ не найден или уже не имеет статус 'Забронирован'.",
+                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+            )
+            await state.set_state(MenuState.SALES_MAIN)
+            return
+        
+        # Проверяем права доступа
+        user = db.query(User).filter(User.telegram_id == callback_query.from_user.id).first()
+        if not user or (order.manager_id != user.id and user.role != UserRole.SUPER_ADMIN.value):
+            await callback_query.message.answer(
+                "У вас нет прав для управления этим заказом.",
+                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+            )
+            await state.set_state(MenuState.SALES_MAIN)
+            return
+        
+        # Меняем статус заказа на PENDING
+        order.status = OrderStatus.PENDING.value
+        db.commit()
+        
+        await callback_query.message.answer(
+            f"✅ Заказ #{order_id} успешно оформлен и ожидает обработки на производстве.",
+            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+        )
+        await state.set_state(MenuState.SALES_MAIN)
+        
+    except Exception as e:
+        db.rollback()
+        logging.error(f"Ошибка при подтверждении забронированного заказа {order_id}: {e}", exc_info=True)
+        await callback_query.message.answer(
+            f"❌ Произошла ошибка при оформлении заказа: {str(e)}",
+            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+        )
+        await state.set_state(MenuState.SALES_MAIN)
+    finally:
+        db.close()
+
+@router.callback_query(lambda c: c.data.startswith("cancel_reserved:"))
+async def process_cancel_reserved_order(callback_query: CallbackQuery, state: FSMContext):
+    """Обработка отмены забронированного заказа"""
+    await callback_query.answer()
+    
+    # Извлекаем ID заказа из callback_data
+    order_id = int(callback_query.data.split(":")[1])
+    
+    db = next(get_db())
+    try:
+        # Получаем заказ
+        order = db.query(Order).filter(
+            Order.id == order_id,
+            Order.status == OrderStatus.RESERVED.value
+        ).first()
+        
+        if not order:
+            await callback_query.message.answer(
+                "Заказ не найден или уже не имеет статус 'Забронирован'.",
+                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+            )
+            await state.set_state(MenuState.SALES_MAIN)
+            return
+        
+        # Проверяем права доступа
+        user = db.query(User).filter(User.telegram_id == callback_query.from_user.id).first()
+        if not user or (order.manager_id != user.id and user.role != UserRole.SUPER_ADMIN.value):
+            await callback_query.message.answer(
+                "У вас нет прав для управления этим заказом.",
+                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+            )
+            await state.set_state(MenuState.SALES_MAIN)
+            return
+        
+        # Меняем статус заказа на CANCELED
+        order.status = OrderStatus.CANCELED.value
+        db.commit()
+        
+        await callback_query.message.answer(
+            f"❌ Бронь заказа #{order_id} успешно отменена.",
+            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+        )
+        await state.set_state(MenuState.SALES_MAIN)
+        
+    except Exception as e:
+        db.rollback()
+        logging.error(f"Ошибка при отмене забронированного заказа {order_id}: {e}", exc_info=True)
+        await callback_query.message.answer(
+            f"❌ Произошла ошибка при отмене брони: {str(e)}",
+            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+        )
+        await state.set_state(MenuState.SALES_MAIN)
     finally:
         db.close()
