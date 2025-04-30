@@ -833,7 +833,7 @@ async def process_order_confirmation(message: Message, state: FSMContext):
     """Обработка подтверждения заказа"""
     user_id = message.from_user.id
     
-    if message.text not in ["✅ Оформить заказ", "🔖 Бронировать", "❌ Отменить заказ"]:
+    if message.text not in ["✅ Оформить заказ", "❌ Отменить заказ"]:
         await message.answer(
             "❌ Неверный выбор. Пожалуйста, используйте кнопки для подтверждения или отмены заказа."
         )
@@ -859,17 +859,14 @@ async def process_order_confirmation(message: Message, state: FSMContext):
             await message.answer("⚠️ Произошла ошибка: ваш аккаунт не найден в системе.")
             return
             
-        # Определяем статус заказа в зависимости от выбора пользователя
-        order_status = OrderStatus.RESERVED if message.text == "🔖 Бронировать" else OrderStatus.NEW
-        
-        # Создаем заказ
+        # Создаем заказ (всегда со статусом NEW)
         order = Order(
             customer_name=data.get("customer_name", ""),
             customer_phone=data.get("customer_phone", ""),
             delivery_address=data.get("delivery_address", ""),
             shipment_date=data.get("shipment_date"),
             payment_method=data.get("payment_method", ""),
-            status=order_status,
+            status=OrderStatus.NEW,
             created_at=datetime.now(),
             need_installation=data.get("need_installation", False),
             manager_id=manager.id
@@ -912,11 +909,7 @@ async def process_order_confirmation(message: Message, state: FSMContext):
             
         db.commit()
         
-        # Определяем сообщение в зависимости от выбора пользователя
-        if message.text == "🔖 Бронировать":
-            success_message = f"🔖 Заказ #{order.id} успешно забронирован!"
-        else:
-            success_message = f"✅ Заказ #{order.id} успешно создан!"
+        success_message = f"✅ Заказ #{order.id} успешно создан!"
         
         await state.clear()
         await message.answer(
@@ -2758,3 +2751,275 @@ async def process_cancel_reserved_order(callback_query: CallbackQuery, state: FS
         await state.set_state(MenuState.SALES_MAIN)
     finally:
         db.close()
+
+@router.message(F.text == "🔖 Бронь", StateFilter(MenuState.SALES_MAIN))
+async def handle_booking(message: Message, state: FSMContext):
+    """Обработчик для бронирования существующих заказов"""
+    if not await check_sales_access(message):
+        return
+    
+    db = next(get_db())
+    try:
+        user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
+        if not user:
+            await message.answer("❌ Ошибка: пользователь не найден в системе.")
+            return
+        
+        # Получаем список всех заказов со статусом NEW
+        available_orders = db.query(Order).filter(
+            Order.status == OrderStatus.NEW,
+            Order.manager_id == user.id  # Только заказы этого менеджера
+        ).order_by(desc(Order.created_at)).all()
+        
+        if not available_orders:
+            await message.answer(
+                "ℹ️ У вас нет доступных заказов для бронирования.",
+                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+            )
+            return
+        
+        response = "📋 Выберите заказ для бронирования:\n\n"
+        for order in available_orders:
+            # Формируем краткую информацию о заказе
+            response += f"🔹 Заказ #{order.id}\n"
+            response += f"   Дата создания: {order.created_at.strftime('%d.%m.%Y %H:%M')}\n"
+            
+            # Получаем информацию о продуктах в заказе
+            order_products = db.query(OrderProduct).filter(OrderProduct.order_id == order.id).all()
+            if order_products:
+                response += f"   Товаров: {len(order_products)}\n"
+                
+            # Проверяем наличие клиентской информации
+            if order.customer_phone:
+                response += f"   Телефон: {order.customer_phone}\n"
+                
+            response += "   ---\n"
+        
+        response += "\nВведите номер заказа, который хотите забронировать:"
+        
+        await message.answer(
+            response,
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="◀️ Назад")]],
+                resize_keyboard=True
+            )
+        )
+        
+        # Устанавливаем состояние ожидания выбора заказа для бронирования
+        await state.set_state(SalesStates.waiting_for_booking_order_selection)
+        
+    except Exception as e:
+        logger.error(f"Ошибка при получении списка заказов для бронирования: {e}")
+        await message.answer(
+            f"⚠️ Произошла ошибка при получении списка заказов: {e}",
+            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+        )
+    finally:
+        db.close()
+
+@router.message(StateFilter(SalesStates.waiting_for_booking_order_selection), F.text.regexp(r'^\d+$'))
+async def process_booking_order_selection(message: Message, state: FSMContext):
+    """Обработка выбора заказа для бронирования"""
+    order_id = int(message.text)
+    
+    db = next(get_db())
+    try:
+        # Получаем данные пользователя
+        user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
+        if not user:
+            await message.answer("❌ Ошибка: пользователь не найден в системе.")
+            return
+        
+        # Проверяем существование заказа и его статус
+        order = db.query(Order).filter(
+            Order.id == order_id,
+            Order.manager_id == user.id  # Только заказы этого менеджера
+        ).first()
+        
+        if not order:
+            await message.answer(
+                f"❌ Заказ #{order_id} не найден или не принадлежит вам.",
+                reply_markup=ReplyKeyboardMarkup(
+                    keyboard=[[KeyboardButton(text="◀️ Назад")]],
+                    resize_keyboard=True
+                )
+            )
+            return
+        
+        if order.status != OrderStatus.NEW:
+            if order.status == OrderStatus.RESERVED:
+                await message.answer(
+                    f"⚠️ Заказ #{order_id} уже забронирован.",
+                    reply_markup=ReplyKeyboardMarkup(
+                        keyboard=[[KeyboardButton(text="◀️ Назад")]],
+                        resize_keyboard=True
+                    )
+                )
+            else:
+                await message.answer(
+                    f"⚠️ Заказ #{order_id} имеет статус '{order.status}' и не может быть забронирован.",
+                    reply_markup=ReplyKeyboardMarkup(
+                        keyboard=[[KeyboardButton(text="◀️ Назад")]],
+                        resize_keyboard=True
+                    )
+                )
+            return
+        
+        # Формируем детальную информацию о заказе для подтверждения
+        order_details = f"🔹 Заказ #{order.id}\n\n"
+        
+        # Основная информация о заказе
+        order_details += f"📅 Дата создания: {order.created_at.strftime('%d.%m.%Y %H:%M')}\n"
+        if order.customer_phone:
+            order_details += f"📞 Телефон клиента: {order.customer_phone}\n"
+        if order.delivery_address:
+            order_details += f"🚚 Адрес доставки: {order.delivery_address}\n"
+        if order.shipment_date:
+            order_details += f"📆 Дата отгрузки: {order.shipment_date.strftime('%d.%m.%Y')}\n"
+        order_details += f"🔧 Монтаж: {'Требуется' if order.need_installation else 'Не требуется'}\n"
+        
+        # Продукты в заказе
+        order_products = db.query(OrderProduct).filter(OrderProduct.order_id == order.id).all()
+        if order_products:
+            order_details += "\n📦 Товары в заказе:\n"
+            for i, product in enumerate(order_products, 1):
+                product_info = db.query(Product).filter(Product.id == product.product_id).first()
+                if product_info:
+                    order_details += f"  {i}. {product_info.name}, количество: {product.quantity}\n"
+                else:
+                    order_details += f"  {i}. Продукт ID: {product.product_id}, количество: {product.quantity}\n"
+        
+        # Стыки в заказе
+        order_joints = db.query(OrderJoint).filter(OrderJoint.order_id == order.id).all()
+        if order_joints:
+            order_details += "\n🔄 Стыки в заказе:\n"
+            for i, joint in enumerate(order_joints, 1):
+                order_details += f"  {i}. Тип: {joint.joint_type}, цвет: {joint.color}, толщина: {joint.thickness}, количество: {joint.quantity}\n"
+        
+        # Клей в заказе
+        order_glue = db.query(OrderGlue).filter(OrderGlue.order_id == order.id).first()
+        if order_glue:
+            order_details += f"\n🧴 Клей: {order_glue.quantity} тюбиков\n"
+        
+        order_details += "\nВы уверены, что хотите забронировать этот заказ?"
+        
+        # Сохраняем ID заказа в контексте состояния
+        await state.update_data(booking_order_id=order_id)
+        
+        # Отправляем детальную информацию и запрашиваем подтверждение
+        await message.answer(
+            order_details,
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[
+                    [KeyboardButton(text="✅ Да, забронировать")],
+                    [KeyboardButton(text="❌ Нет, отменить")],
+                    [KeyboardButton(text="◀️ Назад")]
+                ],
+                resize_keyboard=True
+            )
+        )
+        
+        # Устанавливаем состояние ожидания подтверждения бронирования
+        await state.set_state(SalesStates.waiting_for_booking_confirmation)
+        
+    except Exception as e:
+        logger.error(f"Ошибка при выборе заказа для бронирования: {e}")
+        await message.answer(
+            f"⚠️ Произошла ошибка при выборе заказа: {e}",
+            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+        )
+        await state.set_state(MenuState.SALES_MAIN)
+    finally:
+        db.close()
+
+@router.message(StateFilter(SalesStates.waiting_for_booking_order_selection), F.text == "◀️ Назад")
+async def booking_back_to_main(message: Message, state: FSMContext):
+    """Возврат из выбора заказа в главное меню"""
+    await state.set_state(MenuState.SALES_MAIN)
+    await message.answer(
+        "Вы вернулись в главное меню.",
+        reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+    )
+
+@router.message(StateFilter(SalesStates.waiting_for_booking_confirmation), F.text == "✅ Да, забронировать")
+async def confirm_booking(message: Message, state: FSMContext):
+    """Обработка подтверждения бронирования заказа"""
+    # Получаем ID заказа из контекста состояния
+    data = await state.get_data()
+    order_id = data.get("booking_order_id")
+    
+    if not order_id:
+        await message.answer(
+            "❌ Ошибка: ID заказа не найден в контексте.",
+            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+        )
+        await state.set_state(MenuState.SALES_MAIN)
+        return
+    
+    db = next(get_db())
+    try:
+        # Получаем заказ
+        order = db.query(Order).filter(Order.id == order_id).first()
+        
+        if not order:
+            await message.answer(
+                f"❌ Заказ #{order_id} не найден.",
+                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+            )
+            await state.set_state(MenuState.SALES_MAIN)
+            return
+        
+        if order.status != OrderStatus.NEW:
+            await message.answer(
+                f"⚠️ Заказ #{order_id} не может быть забронирован, так как его статус: {order.status}",
+                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+            )
+            await state.set_state(MenuState.SALES_MAIN)
+            return
+        
+        # Меняем статус заказа на RESERVED
+        order.status = OrderStatus.RESERVED
+        db.commit()
+        
+        await message.answer(
+            f"✅ Заказ #{order_id} успешно переведен в статус 'Reserved'.",
+            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+        )
+        await state.set_state(MenuState.SALES_MAIN)
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Ошибка при бронировании заказа {order_id}: {e}")
+        await message.answer(
+            f"⚠️ Произошла ошибка при бронировании заказа: {e}",
+            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+        )
+        await state.set_state(MenuState.SALES_MAIN)
+    finally:
+        db.close()
+
+@router.message(StateFilter(SalesStates.waiting_for_booking_confirmation), F.text.in_(["❌ Нет, отменить", "◀️ Назад"]))
+async def cancel_booking(message: Message, state: FSMContext):
+    """Отмена бронирования и возврат к выбору заказа"""
+    await message.answer(
+        "Бронирование отменено. Выберите другой заказ или вернитесь в главное меню.",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="◀️ Назад")]],
+            resize_keyboard=True
+        )
+    )
+    await state.set_state(SalesStates.waiting_for_booking_order_selection)
+
+@router.message(StateFilter(SalesStates.waiting_for_booking_order_selection))
+async def invalid_booking_order_input(message: Message, state: FSMContext):
+    """Обработка некорректного ввода при выборе заказа для бронирования"""
+    await message.answer(
+        "Пожалуйста, введите числовой ID заказа или нажмите 'Назад' для возврата в главное меню."
+    )
+
+@router.message(StateFilter(SalesStates.waiting_for_booking_confirmation))
+async def invalid_booking_confirmation_input(message: Message, state: FSMContext):
+    """Обработка некорректного ввода при подтверждении бронирования"""
+    await message.answer(
+        "Пожалуйста, используйте кнопки для подтверждения или отмены бронирования."
+    )

@@ -182,6 +182,7 @@ def get_menu_keyboard(menu_state: MenuState, is_admin_context: bool = False) -> 
             [KeyboardButton(text="✅ Завершенные заказы")],
             [KeyboardButton(text="🔖 Забронированные заказы")],
             [KeyboardButton(text="📊 Остатки")],
+            [KeyboardButton(text="🔖 Бронь")],
         ],
         
         # Подменю продаж
@@ -202,7 +203,7 @@ def get_menu_keyboard(menu_state: MenuState, is_admin_context: bool = False) -> 
         ],
         
         MenuState.SALES_ORDER_CONFIRM: [
-            [KeyboardButton(text="✅ Оформить заказ"), KeyboardButton(text="🔖 Бронировать")],
+            [KeyboardButton(text="✅ Оформить заказ")],
             [KeyboardButton(text="❌ Отменить заказ")],
             [KeyboardButton(text="◀️ Назад")]
         ],
