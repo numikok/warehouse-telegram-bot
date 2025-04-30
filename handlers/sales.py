@@ -853,115 +853,83 @@ async def process_order_confirmation(message: Message, state: FSMContext):
     
     db = next(get_db())
     try:
-        # Получаем пользователя
-        user = db.query(User).filter(User.telegram_id == user_id).first()
-        if not user:
-            await message.answer(
-                "❌ Ошибка: Пользователь не найден в системе!",
-                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
-            )
-            await state.set_state(MenuState.SALES_MAIN)
+        # Проверяем существование пользователя в базе
+        manager = db.query(User).filter(User.telegram_id == user_id).first()
+        if not manager:
+            await message.answer("⚠️ Произошла ошибка: ваш аккаунт не найден в системе.")
             return
-        
-        # Получаем данные заказа из состояния
-        selected_products = data.get('selected_products', [])
-        selected_joints = data.get('selected_joints', [])
-        glue_quantity = data.get('glue_quantity', 0)
-        installation_required = data.get('installation_required', False)
-        customer_phone = data.get('customer_phone', '')
-        delivery_address = data.get('delivery_address', '')
-        payment_method = data.get('payment_method', '')
-        shipment_date_str = data.get('shipment_date', None)
-        
-        # Конвертируем строку даты в объект date, если есть
-        shipment_date = None
-        if shipment_date_str:
-            # Проверяем, является ли shipment_date_str уже объектом datetime.date
-            if isinstance(shipment_date_str, date):
-                shipment_date = shipment_date_str
-            else:
-                try:
-                    shipment_date = datetime.strptime(shipment_date_str, "%d.%m.%Y").date()
-                except ValueError:
-                    logging.warning(f"Неверный формат даты: {shipment_date_str}")
-        
+            
         # Определяем статус заказа в зависимости от выбора пользователя
-        status = OrderStatus.NEW if message.text == "✅ Оформить заказ" else OrderStatus.RESERVED
+        order_status = OrderStatus.RESERVED if message.text == "🔖 Бронировать" else OrderStatus.NEW
         
-        # Создаем новый заказ
-        new_order = Order(
-            manager_id=user.id,
-            status=status,
-            installation_required=installation_required,
-            customer_phone=customer_phone,
-            delivery_address=delivery_address,
-            shipment_date=shipment_date,
-            payment_method=payment_method
+        # Создаем заказ
+        order = Order(
+            customer_name=data.get("customer_name", ""),
+            customer_phone=data.get("customer_phone", ""),
+            delivery_address=data.get("delivery_address", ""),
+            shipment_date=data.get("shipment_date"),
+            payment_method=data.get("payment_method", ""),
+            status=order_status,
+            created_at=datetime.now(),
+            need_installation=data.get("need_installation", False),
+            manager_id=manager.id
         )
-        db.add(new_order)
-        db.flush()  # Получаем ID заказа
         
-        # Добавляем товары в заказ
-        for product in selected_products:
-            order_item = OrderItem(
-                order_id=new_order.id,
-                color=product['film_code'],
-                thickness=float(product['thickness']),
-                quantity=int(product['quantity'])
+        db.add(order)
+        db.flush()  # Получаем id заказа
+        
+        # Добавляем продукты к заказу
+        products = data.get("products", [])
+        for product in products:
+            order_product = OrderProduct(
+                order_id=order.id,
+                product_id=product["id"],
+                quantity=product["quantity"]
             )
-            db.add(order_item)
-        
-        # Добавляем стыки в заказ, если есть
-        for joint in selected_joints:
-            joint_type_enum = None
-            if joint.get('type').lower() == 'butterfly':
-                joint_type_enum = JointType.BUTTERFLY
-            elif joint.get('type').lower() == 'closing':
-                joint_type_enum = JointType.CLOSING
-            else:
-                joint_type_enum = JointType.SIMPLE
-                
+            db.add(order_product)
+            
+        # Добавляем стыки, если они есть
+        joints = data.get("joints", [])
+        for joint in joints:
             order_joint = OrderJoint(
-                order_id=new_order.id,
-                joint_type=joint_type_enum,
-                joint_color=joint.get('color', ''),
-                joint_quantity=int(joint.get('quantity', 0)),
-                joint_thickness=float(joint.get('thickness', 0.5))
+                order_id=order.id,
+                joint_type=joint["type"],
+                color=joint["color"],
+                thickness=joint.get("thickness", ""),
+                quantity=joint["quantity"]
             )
             db.add(order_joint)
-        
-        # Добавляем клей в заказ, если указан
-        if glue_quantity > 0:
+            
+        # Добавляем клей, если он есть
+        glue_needed = data.get("glue_needed", False)
+        if glue_needed:
+            glue_quantity = data.get("glue_quantity", 0)
             order_glue = OrderGlue(
-                order_id=new_order.id,
+                order_id=order.id,
                 quantity=glue_quantity
             )
             db.add(order_glue)
-        
-        # Сохраняем все изменения
+            
         db.commit()
         
-        # Отправляем сообщение об успешном создании заказа
-        if message.text == "✅ Оформить заказ":
-            await message.answer(
-                f"✅ Заказ #{new_order.id} успешно создан!",
-                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
-            )
+        # Определяем сообщение в зависимости от выбора пользователя
+        if message.text == "🔖 Бронировать":
+            success_message = f"🔖 Заказ #{order.id} успешно забронирован!"
         else:
-            await message.answer(
-                f"✅ Заказ #{new_order.id} успешно забронирован!",
-                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
-            )
+            success_message = f"✅ Заказ #{order.id} успешно создан!"
         
-        # Сбрасываем состояние
         await state.clear()
+        await message.answer(
+            success_message,
+            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+        )
         await state.set_state(MenuState.SALES_MAIN)
         
     except Exception as e:
         db.rollback()
-        logging.error(f"Ошибка при создании заказа: {str(e)}", exc_info=True)
+        logger.error(f"Ошибка при создании заказа: {e}")
         await message.answer(
-            f"❌ Произошла ошибка при создании заказа: {str(e)}",
+            f"⚠️ Произошла ошибка при создании заказа: {e}",
             reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
         )
         await state.set_state(MenuState.SALES_MAIN)
@@ -2537,136 +2505,6 @@ async def view_completed_order_sales(message: Message, state: FSMContext):
     finally:
         db.close()
 
-@router.message(F.text == "🔖 Бронировать", StateFilter(SalesStates.waiting_for_order_confirmation))
-async def process_reserve_order(message: Message, state: FSMContext):
-    """Обработка бронирования заказа"""
-    user_id = message.from_user.id
-    data = await state.get_data()
-    
-    db = next(get_db())
-    try:
-        # Получаем пользователя
-        user = db.query(User).filter(User.telegram_id == user_id).first()
-        if not user:
-            await message.answer(
-                "❌ Ошибка: Пользователь не найден в системе!",
-                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
-            )
-            await state.set_state(MenuState.SALES_MAIN)
-            return
-        
-        # Получаем данные заказа
-        selected_products = data.get('selected_products', [])
-        selected_joints = data.get('selected_joints', [])
-        glue_quantity = data.get('glue_quantity', 0)
-        installation_required = data.get('installation_required', False)
-        customer_phone = data.get('customer_phone', '')
-        delivery_address = data.get('delivery_address', '')
-        payment_method = data.get('payment_method', '')
-        shipment_date_str = data.get('shipment_date', None)
-        
-        # Конвертируем строку даты в объект date, если есть
-        shipment_date = None
-        if shipment_date_str:
-            # Проверяем, является ли shipment_date_str уже объектом datetime.date
-            if isinstance(shipment_date_str, date):
-                shipment_date = shipment_date_str
-            else:
-                try:
-                    shipment_date = datetime.strptime(shipment_date_str, "%d.%m.%Y").date()
-                except ValueError:
-                    logging.warning(f"Неверный формат даты: {shipment_date_str}")
-        
-        # Проверяем наличие выбранных продуктов
-        if not selected_products:
-            await message.answer(
-                "❌ Ошибка: Заказ не содержит продуктов!",
-                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
-            )
-            await state.set_state(MenuState.SALES_MAIN)
-            return
-        
-        # Создаем запись о бронировании
-        new_order = Order(
-            manager_id=user.id,
-            status=OrderStatus.RESERVED,  # Используем enum объект вместо строки
-            customer_phone=customer_phone,
-            delivery_address=delivery_address,
-            installation_required=installation_required,
-            created_at=datetime.now(),
-            payment_method=payment_method,
-            shipment_date=shipment_date
-        )
-        db.add(new_order)
-        db.flush()  # Получаем ID нового заказа
-        
-        # Создаем записи о продуктах
-        for product in selected_products:
-            order_item = OrderItem(
-                order_id=new_order.id,
-                color=product['film_code'],
-                thickness=float(product['thickness']),
-                quantity=int(product['quantity'])
-            )
-            db.add(order_item)
-        
-        # Создаем записи о стыках
-        for joint in selected_joints:
-            joint_type_enum = None
-            if joint.get('type').lower() == 'butterfly':
-                joint_type_enum = JointType.BUTTERFLY
-            elif joint.get('type').lower() == 'closing':
-                joint_type_enum = JointType.CLOSING
-            else:
-                joint_type_enum = JointType.SIMPLE
-            
-            order_joint = OrderJoint(
-                order_id=new_order.id,
-                joint_type=joint_type_enum,
-                joint_color=joint.get('color', ''),
-                joint_quantity=int(joint.get('quantity', 0)),
-                joint_thickness=float(joint.get('thickness', 0.5))
-            )
-            db.add(order_joint)
-        
-        # Создаем запись о клее, если требуется
-        if glue_quantity > 0:
-            order_glue = OrderGlue(
-                order_id=new_order.id,
-                quantity=glue_quantity
-            )
-            db.add(order_glue)
-        
-        # Сохраняем изменения в БД
-        db.commit()
-        
-        # Отправляем сообщение о успешном бронировании
-        await message.answer(
-            f"✅ Заказ успешно забронирован!\n\n"
-            f"Номер заказа: #{new_order.id}\n"
-            f"Статус: Забронирован\n"
-            f"Для управления заказом используйте раздел 'Забронированные заказы'",
-            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
-        )
-        await state.set_state(MenuState.SALES_MAIN)
-        
-    except Exception as e:
-        db.rollback()
-        logging.error(f"Ошибка при бронировании заказа: {e}", exc_info=True)
-        await message.answer(
-            f"❌ Произошла ошибка при бронировании заказа: {str(e)}",
-            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
-        )
-        await state.set_state(MenuState.SALES_MAIN)
-    finally:
-        db.close()
-
-@router.message(F.text == "🔖 Забронированные заказы", StateFilter(MenuState.SALES_MAIN))
-async def handle_reserved_orders_sales(message: Message, state: FSMContext):
-    """Отображает список забронированных заказов"""
-    if not await check_sales_access(message):
-        return
-    
     await state.set_state(MenuState.SALES_RESERVED_ORDERS)
     db = next(get_db())
     try:
@@ -2677,7 +2515,7 @@ async def handle_reserved_orders_sales(message: Message, state: FSMContext):
         
         # Получаем забронированные заказы этого менеджера
         reserved_orders = db.query(Order).filter(
-            Order.status == OrderStatus.RESERVED.value,
+            Order.status == OrderStatus.RESERVED,
             Order.manager_id == user.id
         ).order_by(desc(Order.created_at)).all()
         
@@ -2738,7 +2576,7 @@ async def view_reserved_order_sales(message: Message, state: FSMContext):
             joinedload(Order.glues)
         ).filter(
             Order.id == order_id,
-            Order.status == OrderStatus.RESERVED.value
+            Order.status == OrderStatus.RESERVED
         ).first()
         
         if not order:
@@ -2824,7 +2662,7 @@ async def process_confirm_reserved_order(callback_query: CallbackQuery, state: F
         # Получаем заказ
         order = db.query(Order).filter(
             Order.id == order_id,
-            Order.status == OrderStatus.RESERVED.value
+            Order.status == OrderStatus.RESERVED
         ).first()
         
         if not order:
@@ -2846,11 +2684,11 @@ async def process_confirm_reserved_order(callback_query: CallbackQuery, state: F
             return
         
         # Меняем статус заказа на PENDING
-        order.status = OrderStatus.PENDING.value
+        order.status = OrderStatus.PENDING
         db.commit()
         
         await callback_query.message.answer(
-            f"✅ Заказ #{order_id} успешно оформлен и ожидает обработки на производстве.",
+            f"✅ Заказ #{order_id} подтвержден и отправлен в производство.",
             reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
         )
         await state.set_state(MenuState.SALES_MAIN)
@@ -2859,7 +2697,7 @@ async def process_confirm_reserved_order(callback_query: CallbackQuery, state: F
         db.rollback()
         logging.error(f"Ошибка при подтверждении забронированного заказа {order_id}: {e}", exc_info=True)
         await callback_query.message.answer(
-            f"❌ Произошла ошибка при оформлении заказа: {str(e)}",
+            f"❌ Произошла ошибка при подтверждении заказа: {str(e)}",
             reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
         )
         await state.set_state(MenuState.SALES_MAIN)
@@ -2879,7 +2717,7 @@ async def process_cancel_reserved_order(callback_query: CallbackQuery, state: FS
         # Получаем заказ
         order = db.query(Order).filter(
             Order.id == order_id,
-            Order.status == OrderStatus.RESERVED.value
+            Order.status == OrderStatus.RESERVED
         ).first()
         
         if not order:
@@ -2900,12 +2738,12 @@ async def process_cancel_reserved_order(callback_query: CallbackQuery, state: FS
             await state.set_state(MenuState.SALES_MAIN)
             return
         
-        # Меняем статус заказа на CANCELED
-        order.status = OrderStatus.CANCELED.value
+        # Меняем статус заказа на CANCELLED
+        order.status = OrderStatus.CANCELLED
         db.commit()
         
         await callback_query.message.answer(
-            f"❌ Бронь заказа #{order_id} успешно отменена.",
+            f"❌ Заказ #{order_id} отменен.",
             reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
         )
         await state.set_state(MenuState.SALES_MAIN)
@@ -2914,7 +2752,7 @@ async def process_cancel_reserved_order(callback_query: CallbackQuery, state: FS
         db.rollback()
         logging.error(f"Ошибка при отмене забронированного заказа {order_id}: {e}", exc_info=True)
         await callback_query.message.answer(
-            f"❌ Произошла ошибка при отмене брони: {str(e)}",
+            f"❌ Произошла ошибка при отмене заказа: {str(e)}",
             reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
         )
         await state.set_state(MenuState.SALES_MAIN)
