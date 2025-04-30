@@ -827,316 +827,133 @@ async def process_payment_method(message: Message, state: FSMContext):
     # Устанавливаем состояние ожидания подтверждения
     await state.set_state(SalesStates.waiting_for_order_confirmation) 
 
-@router.message(SalesStates.waiting_for_order_confirmation)
+@router.message(StateFilter(SalesStates.waiting_for_order_confirmation))
 async def process_order_confirmation(message: Message, state: FSMContext):
-    """Обработка подтверждения заказа с новыми полями"""
-    response = message.text.strip()
+    """Обработка подтверждения заказа"""
+    user_id = message.from_user.id
     
-    if response == "✅ Оформить заказ":
-        data = await state.get_data()
-        selected_products = data.get("selected_products", [])
-        selected_joints = data.get("selected_joints", [])
-        customer_phone = data.get("customer_phone", "")
-        delivery_address = data.get("delivery_address", "")
-        installation_required = data.get("installation_required", False)
-        glue_quantity = data.get("glue_quantity", 0)
-        shipment_date = data.get("shipment_date") # Получаем дату
-        payment_method = data.get("payment_method") # Получаем способ оплаты
-        telegram_id = message.from_user.id
-        
-        db = next(get_db())
-        try:
-            user = db.query(User).filter(User.telegram_id == telegram_id).first()
-            if not user:
-                logging.error(f"User with telegram_id={telegram_id} not found.")
-                await message.answer("❌ Ошибка: Ваш пользователь не найден.", reply_markup=get_menu_keyboard(MenuState.SALES_MAIN))
-                await state.clear()
-                return
-            
-            manager_db_id = user.id
-            
-            # Создаем заказ с новыми полями
-            order = Order(
-                manager_id=manager_db_id,
-                customer_phone=customer_phone,
-                delivery_address=delivery_address,
-                installation_required=installation_required,
-                shipment_date=shipment_date, 
-                payment_method=payment_method,
-                status=OrderStatus.NEW
-            )
-            db.add(order)
-            db.flush()
-            
-            # ... (логика добавления продуктов, стыков, клея остается прежней) ...
-            # Добавляем продукты в заказ
-            total_panels = 0
-            for product in selected_products:
-                film_code = product['film_code']
-                thickness = float(product['thickness'])
-                qty = product['quantity']
-                total_panels += qty
-                
-                film = db.query(Film).filter(Film.code == film_code).first()
-                if not film:
-                    continue
-                
-                # Проверяем, есть ли готовая продукция
-                finished_product = db.query(FinishedProduct).join(Film).filter(
-                    Film.code == film_code,
-                    FinishedProduct.thickness == thickness
-                ).first()
-                
-                if finished_product and finished_product.quantity >= qty:
-                    # Если есть готовая продукция, используем её
-                    order_item = OrderItem(
-                        order_id=order.id,
-                        quantity=qty,
-                        color=product['film_code'],
-                        thickness=product['thickness']
-                    )
-                    db.add(order_item)
-                else:
-                    # Если нет готовой продукции, создаем заказ на производство
-                    order_item = OrderItem(
-                        order_id=order.id,
-                        quantity=qty,
-                        color=product['film_code'],
-                        thickness=product['thickness']
-                    )
-                    
-                    # Создаем производственный заказ
-                    production_order = ProductionOrder(
-                        manager_id=manager_db_id,
-                        film_id=film.id,
-                        panel_thickness=thickness,
-                        panel_quantity=qty,
-                        status="new"
-                    )
-                    db.add(production_order)
-                
-                db.add(order_item)
-            
-            # Если нужны стыки, добавляем их в заказ
-            total_joints = 0
-            need_joints = len(selected_joints) > 0
-            if need_joints and selected_joints:
-                for joint in selected_joints:
-                    joint_type_val = joint.get('type')
-                    thickness = float(joint.get('thickness'))
-                    color = joint.get('color')
-                    joint_qty = joint.get('quantity')
-                    
-                    # Преобразуем строковое значение типа стыка обратно в enum
-                    joint_type_enum = None
-                    if joint_type_val == "butterfly": joint_type_enum = JointType.BUTTERFLY
-                    elif joint_type_val == "simple": joint_type_enum = JointType.SIMPLE
-                    elif joint_type_val == "closing": joint_type_enum = JointType.CLOSING
-                        
-                    if not joint_type_enum: continue
-                        
-                    # Находим соответствующий стык в базе
-                    joint_db = db.query(Joint).filter(
-                        Joint.type == joint_type_enum,
-                        Joint.thickness == thickness,
-                        Joint.color == color
-                    ).first()
-                    
-                    if joint_db and joint_db.quantity >= joint_qty:
-                        # Создаем связь между заказом и стыком
-                        order_joint = OrderJoint(
-                            order_id=order.id,
-                            joint_type=joint_type_enum,
-                            joint_color=color,
-                            joint_quantity=joint_qty, # Используем правильное имя поля
-                            joint_thickness=thickness
-                        )
-                        db.add(order_joint)
-            
-            # Если указано количество клея, добавляем в заказ
-            if glue_quantity > 0:
-                glue = db.query(Glue).first()
-                if glue and glue.quantity >= glue_quantity:
-                    order_glue = OrderGlue(
-                        order_id=order.id,
-                        quantity=glue_quantity
-                    )
-                    db.add(order_glue)
-            
-            db.commit()
-            
-            # Формируем итоговое сообщение с новыми полями
-            products_info = "Продукция:\n" + "\n".join([f"▪️ {p['film_code']} ({p['thickness']} мм): {p['quantity']} шт." for p in selected_products]) if selected_products else ""
-            joints_info = ""
-            if need_joints and selected_joints:
-                joints_info = "\nСтыки:\n" + "\n".join([f"▪️ Тип: {j.get('type', '')}, {j.get('thickness', '')} мм, {j.get('color', '')}: {j.get('quantity', 0)} шт." for j in selected_joints])
-            
-            shipment_date_str = shipment_date.strftime('%d.%m.%Y') if shipment_date else 'Не указана'
-            
-            confirmation_message = (
-                f"✅ Заказ #{order.id} успешно создан!\n\n"
-                f"{products_info}\n"
-                f"{joints_info}\n"
-                f"\n🧴 Клей: {glue_quantity} тюбиков\n"
-                f"🔧 Монтаж: {'Требуется' if installation_required else 'Не требуется'}\n"
-                f"📞 Контактный телефон: {customer_phone}\n"
-                f"🚚 Адрес доставки: {delivery_address}\n"
-                f"🗓 Дата отгрузки: {shipment_date_str}\n"
-                f"💳 Способ оплаты: {payment_method}\n"
-            )
-            
-            await state.clear() # Очищаем состояние после успешного создания
-            await message.answer(confirmation_message, reply_markup=get_menu_keyboard(MenuState.SALES_MAIN))
-        except Exception as e:
-            db.rollback()
-            logging.error(f"Error creating order: {e}", exc_info=True)
-            await message.answer(f"❌ Произошла ошибка при создании заказа: {e}", reply_markup=get_menu_keyboard(MenuState.SALES_MAIN))
-            await state.clear() # Очищаем состояние при ошибке
-        finally:
-            db.close()
-    
-    elif response == "🔖 Бронировать":
-        data = await state.get_data()
-        selected_products = data.get("selected_products", [])
-        selected_joints = data.get("selected_joints", [])
-        customer_phone = data.get("customer_phone", "")
-        delivery_address = data.get("delivery_address", "")
-        installation_required = data.get("installation_required", False)
-        glue_quantity = data.get("glue_quantity", 0)
-        shipment_date = data.get("shipment_date")
-        payment_method = data.get("payment_method")
-        telegram_id = message.from_user.id
-        
-        db = next(get_db())
-        try:
-            user = db.query(User).filter(User.telegram_id == telegram_id).first()
-            if not user:
-                logging.error(f"User with telegram_id={telegram_id} not found.")
-                await message.answer("❌ Ошибка: Ваш пользователь не найден.", reply_markup=get_menu_keyboard(MenuState.SALES_MAIN))
-                await state.clear()
-                return
-            
-            manager_db_id = user.id
-            
-            # Создаем заказ со статусом RESERVED
-            order = Order(
-                manager_id=manager_db_id,
-                customer_phone=customer_phone,
-                delivery_address=delivery_address,
-                installation_required=installation_required,
-                shipment_date=shipment_date, 
-                payment_method=payment_method,
-                status=OrderStatus.RESERVED
-            )
-            db.add(order)
-            db.flush()
-            
-            # Добавляем продукты в заказ
-            total_panels = 0
-            for product in selected_products:
-                film_code = product['film_code']
-                thickness = float(product['thickness'])
-                qty = product['quantity']
-                total_panels += qty
-                
-                film = db.query(Film).filter(Film.code == film_code).first()
-                if not film:
-                    continue
-                
-                order_item = OrderItem(
-                    order_id=order.id,
-                    quantity=qty,
-                    color=product['film_code'],
-                    thickness=product['thickness']
-                )
-                db.add(order_item)
-            
-            # Если нужны стыки, добавляем их в заказ
-            need_joints = len(selected_joints) > 0
-            if need_joints and selected_joints:
-                for joint in selected_joints:
-                    joint_type_val = joint.get('type')
-                    thickness = float(joint.get('thickness'))
-                    color = joint.get('color')
-                    joint_qty = joint.get('quantity')
-                    
-                    # Преобразуем строковое значение типа стыка обратно в enum
-                    joint_type_enum = None
-                    if joint_type_val == "butterfly": joint_type_enum = JointType.BUTTERFLY
-                    elif joint_type_val == "simple": joint_type_enum = JointType.SIMPLE
-                    elif joint_type_val == "closing": joint_type_enum = JointType.CLOSING
-                        
-                    if not joint_type_enum: continue
-                    
-                    # Создаем связь между заказом и стыком
-                    order_joint = OrderJoint(
-                        order_id=order.id,
-                        joint_type=joint_type_enum,
-                        joint_color=color,
-                        joint_quantity=joint_qty,
-                        joint_thickness=thickness
-                    )
-                    db.add(order_joint)
-            
-            # Если указано количество клея, добавляем в заказ
-            if glue_quantity > 0:
-                order_glue = OrderGlue(
-                    order_id=order.id,
-                    quantity=glue_quantity
-                )
-                db.add(order_glue)
-            
-            db.commit()
-            
-            # Формируем итоговое сообщение для забронированного заказа
-            products_info = "Продукция:\n" + "\n".join([f"▪️ {p['film_code']} ({p['thickness']} мм): {p['quantity']} шт." for p in selected_products]) if selected_products else ""
-            joints_info = ""
-            if need_joints and selected_joints:
-                joints_info = "\nСтыки:\n" + "\n".join([f"▪️ Тип: {j.get('type', '')}, {j.get('thickness', '')} мм, {j.get('color', '')}: {j.get('quantity', 0)} шт." for j in selected_joints])
-            
-            shipment_date_str = shipment_date.strftime('%d.%m.%Y') if shipment_date else 'Не указана'
-            
-            confirmation_message = (
-                f"🔖 Заказ #{order.id} успешно забронирован!\n\n"
-                f"{products_info}\n"
-                f"{joints_info}\n"
-                f"\n🧴 Клей: {glue_quantity} тюбиков\n"
-                f"🔧 Монтаж: {'Требуется' if installation_required else 'Не требуется'}\n"
-                f"📞 Контактный телефон: {customer_phone}\n"
-                f"🚚 Адрес доставки: {delivery_address}\n"
-                f"🗓 Дата отгрузки: {shipment_date_str}\n"
-                f"💳 Способ оплаты: {payment_method}\n"
-            )
-            
-            await state.clear() # Очищаем состояние после успешного создания
-            await message.answer(confirmation_message, reply_markup=get_menu_keyboard(MenuState.SALES_MAIN))
-        except Exception as e:
-            db.rollback()
-            logging.error(f"Error creating reserved order: {e}", exc_info=True)
-            await message.answer(f"❌ Произошла ошибка при бронировании заказа: {e}", reply_markup=get_menu_keyboard(MenuState.SALES_MAIN))
-            await state.clear() # Очищаем состояние при ошибке
-        finally:
-            db.close()
-            
-    elif response == "❌ Отменить заказ":
-        await state.clear()
-        await message.answer("Заказ отменен.", reply_markup=get_menu_keyboard(MenuState.SALES_MAIN))
-    elif response == "◀️ Назад":
-         # Возвращаемся к вводу способа оплаты
-        keyboard = ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="Юр. Комп.")],
-                [KeyboardButton(text="Наличные")],
-                [KeyboardButton(text="Kaspi")],
-                [KeyboardButton(text="❌ Отмена")] # Добавляем кнопку Отмена
-            ],
-            resize_keyboard=True
+    if message.text not in ["✅ Оформить заказ", "🔖 Бронировать", "❌ Отменить заказ"]:
+        await message.answer(
+            "❌ Неверный выбор. Пожалуйста, используйте кнопки для подтверждения или отмены заказа."
         )
-        await message.answer("Выберите способ оплаты:", reply_markup=keyboard)
-        await state.set_state(SalesStates.waiting_for_payment_method)
-    else:
-        # Если не один из стандартных вариантов ответа, напоминаем о доступных опциях
-        await message.answer("Пожалуйста, выберите один из вариантов: ✅ Оформить заказ, 🔖 Бронировать, ❌ Отменить заказ или ◀️ Назад", reply_markup=get_menu_keyboard(MenuState.SALES_ORDER_CONFIRM))
+        return
+        
+    if message.text == "❌ Отменить заказ":
+        await state.clear()
+        await message.answer(
+            "🚫 Заказ отменен.",
+            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+        )
+        await state.set_state(MenuState.SALES_MAIN)
+        return
+        
+    # Создание заказа
+    data = await state.get_data()
+    
+    db = next(get_db())
+    try:
+        # Получаем пользователя
+        user = db.query(User).filter(User.telegram_id == user_id).first()
+        if not user:
+            await message.answer(
+                "❌ Ошибка: Пользователь не найден в системе!",
+                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+            )
+            await state.set_state(MenuState.SALES_MAIN)
+            return
+            
+        selected_products = data.get('selected_products', [])
+        selected_joints = data.get('selected_joints', [])
+        glue_quantity = data.get('glue_quantity', 0)
+        installation_required = data.get('installation_required', False)
+        customer_phone = data.get('customer_phone', '')
+        delivery_address = data.get('delivery_address', '')
+        payment_method = data.get('payment_method', '')
+        shipment_date = data.get('shipment_date', None)
+        
+        if not selected_products:
+            await message.answer(
+                "❌ Ошибка: Заказ не содержит продуктов!",
+                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+            )
+            await state.set_state(MenuState.SALES_MAIN)
+            return
+            
+        # Определяем статус в зависимости от выбора пользователя
+        status = OrderStatus.NEW if message.text == "✅ Оформить заказ" else OrderStatus.RESERVED
+        
+        # Создаем заказ
+        order = Order(
+            manager_id=user.id,
+            status=status,
+            customer_phone=customer_phone,
+            delivery_address=delivery_address,
+            installation_required=installation_required,
+            created_at=datetime.now(),
+            payment_method=payment_method,
+            shipment_date=shipment_date
+        )
+        db.add(order)
+        db.flush()  # Чтобы получить ID заказа
+        
+        # Добавляем продукты к заказу
+        for product in selected_products:
+            order_item = OrderItem(
+                order_id=order.id,
+                color=product['film_code'],
+                thickness=product['thickness'],
+                quantity=product['quantity']
+            )
+            db.add(order_item)
+            
+        # Добавляем стыки к заказу, если они есть
+        for joint in selected_joints:
+            joint_type_enum = JointType.SIMPLE
+            if joint.get('type') == 'butterfly':
+                joint_type_enum = JointType.BUTTERFLY
+            elif joint.get('type') == 'closing':
+                joint_type_enum = JointType.CLOSING
+                
+            order_joint = OrderJoint(
+                order_id=order.id,
+                joint_type=joint_type_enum,
+                joint_thickness=joint.get('thickness', ''),
+                joint_color=joint.get('color', ''),
+                quantity=joint.get('quantity', 0)
+            )
+            db.add(order_joint)
+            
+        # Добавляем клей, если требуется
+        if glue_quantity > 0:
+            order_glue = OrderGlue(
+                order_id=order.id,
+                quantity=glue_quantity
+            )
+            db.add(order_glue)
+            
+        # Сохраняем все изменения
+        db.commit()
+        
+        # Отправляем сообщение об успешном создании заказа
+        status_text = "создан" if status == OrderStatus.NEW else "забронирован"
+        await message.answer(
+            f"✅ Заказ успешно {status_text}!\n\n"
+            f"Номер заказа: #{order.id}\n"
+            f"Статус: {'Новый' if status == OrderStatus.NEW else 'Забронирован'}",
+            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+        )
+        await state.set_state(MenuState.SALES_MAIN)
+        
+    except Exception as e:
+        db.rollback()
+        logging.error(f"Ошибка при создании заказа: {e}", exc_info=True)
+        await message.answer(
+            f"❌ Произошла ошибка при создании заказа: {str(e)}",
+            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+        )
+        await state.set_state(MenuState.SALES_MAIN)
+    finally:
+        db.close()
 
 @router.message(F.text == "🔙 Назад в админку")
 async def handle_back_to_admin(message: Message, state: FSMContext):
@@ -2747,7 +2564,7 @@ async def process_reserve_order(message: Message, state: FSMContext):
         # Создаем запись о бронировании
         new_order = Order(
             manager_id=user.id,
-            status=OrderStatus.RESERVED.value,  # Устанавливаем статус RESERVED
+            status=OrderStatus.RESERVED,  # Устанавливаем статус RESERVED без .value
             customer_phone=customer_phone,
             delivery_address=delivery_address,
             installation_required=installation_required,
