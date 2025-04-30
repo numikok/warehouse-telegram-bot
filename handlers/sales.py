@@ -886,7 +886,7 @@ async def process_order_confirmation(message: Message, state: FSMContext):
                     logging.warning(f"Неверный формат даты: {shipment_date_str}")
         
         # Определяем статус заказа в зависимости от выбора пользователя
-        status = "new" if message.text == "✅ Оформить заказ" else "reserved"
+        status = OrderStatus.NEW if message.text == "✅ Оформить заказ" else OrderStatus.RESERVED
         
         # Создаем новый заказ
         new_order = Order(
@@ -2589,7 +2589,7 @@ async def process_reserve_order(message: Message, state: FSMContext):
         # Создаем запись о бронировании
         new_order = Order(
             manager_id=user.id,
-            status="reserved",  # Используем строку вместо enum объекта
+            status=OrderStatus.RESERVED,  # Используем enum объект вместо строки
             customer_phone=customer_phone,
             delivery_address=delivery_address,
             installation_required=installation_required,
@@ -2677,7 +2677,7 @@ async def handle_reserved_orders_sales(message: Message, state: FSMContext):
         
         # Получаем забронированные заказы этого менеджера
         reserved_orders = db.query(Order).filter(
-            Order.status == "reserved",
+            Order.status == OrderStatus.RESERVED.value,
             Order.manager_id == user.id
         ).order_by(desc(Order.created_at)).all()
         
@@ -2738,7 +2738,7 @@ async def view_reserved_order_sales(message: Message, state: FSMContext):
             joinedload(Order.glues)
         ).filter(
             Order.id == order_id,
-            Order.status == "reserved"
+            Order.status == OrderStatus.RESERVED.value
         ).first()
         
         if not order:
