@@ -113,6 +113,17 @@ ROLE_MAIN_MENU = {
     UserRole.NONE: None,  # Для роли NONE нет главного меню
 }
 
+def get_main_menu_state_for_role(role: UserRole) -> MenuState:
+    """Возвращает состояние главного меню для указанной роли пользователя
+    
+    Args:
+        role: Роль пользователя
+        
+    Returns:
+        Состояние главного меню для указанной роли
+    """
+    return ROLE_MAIN_MENU.get(role)
+
 def get_menu_keyboard(menu_state: MenuState, is_admin_context: bool = False) -> ReplyKeyboardMarkup:
     """Возвращает клавиатуру для конкретного состояния меню
     
