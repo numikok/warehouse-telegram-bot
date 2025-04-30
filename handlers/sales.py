@@ -3,7 +3,7 @@ from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, InlineKe
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from models import User, UserRole, Film, Panel, Joint, Glue, FinishedProduct, Operation, JointType, Order, ProductionOrder, OrderStatus, OrderJoint, OrderGlue, OperationType, OrderItem, CompletedOrder, CompletedOrderStatus, StockReservation
+from models import User, UserRole, Film, Panel, Joint, Glue, FinishedProduct, Operation, JointType, Order, ProductionOrder, OrderStatus, OrderJoint, OrderGlue, OperationType, OrderItem, CompletedOrder, CompletedOrderStatus
 from database import get_db
 import json
 import logging
