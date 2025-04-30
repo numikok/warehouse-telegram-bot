@@ -12,7 +12,7 @@ import re
 from states import SalesStates
 from typing import Optional, Dict, List, Any, Union
 from sqlalchemy import select, desc
-from datetime import datetime
+from datetime import datetime, date
 from sqlalchemy.orm import joinedload
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -877,7 +877,7 @@ async def process_order_confirmation(message: Message, state: FSMContext):
         shipment_date = None
         if shipment_date_str:
             # Проверяем, является ли shipment_date_str уже объектом datetime.date
-            if isinstance(shipment_date_str, datetime.date):
+            if isinstance(shipment_date_str, date):
                 shipment_date = shipment_date_str
             else:
                 try:
@@ -2569,7 +2569,7 @@ async def process_reserve_order(message: Message, state: FSMContext):
         shipment_date = None
         if shipment_date_str:
             # Проверяем, является ли shipment_date_str уже объектом datetime.date
-            if isinstance(shipment_date_str, datetime.date):
+            if isinstance(shipment_date_str, date):
                 shipment_date = shipment_date_str
             else:
                 try:
