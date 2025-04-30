@@ -11,6 +11,7 @@ from navigation import MenuState, get_menu_keyboard, go_back
 from datetime import datetime, timedelta
 from sqlalchemy.orm import joinedload, selectinload
 from sqlalchemy import desc
+import re
 
 router = Router()
 
@@ -1592,3 +1593,327 @@ async def process_reject_return(callback_query: CallbackQuery, state: FSMContext
         await callback_query.answer("❌ Произошла общая ошибка.", show_alert=True)
     finally:
         db.close() 
+
+@router.message(F.text == "🔖 Забронированные заказы", StateFilter(MenuState.WAREHOUSE_MAIN))
+async def handle_reserved_orders_warehouse(message: Message, state: FSMContext):
+    """Отображает список забронированных заказов для складского работника"""
+    if not await check_warehouse_access(message):
+        return
+    
+    db = next(get_db())
+    try:
+        # Получаем все забронированные заказы со статусом RESERVED
+        reserved_orders = db.query(Order).filter(
+            Order.status == OrderStatus.RESERVED.value
+        ).options(
+            joinedload(Order.products),
+            joinedload(Order.joints),
+            joinedload(Order.glues),
+            joinedload(Order.manager)
+        ).order_by(desc(Order.created_at)).all()
+        
+        if not reserved_orders:
+            await message.answer(
+                "🔖 Нет забронированных заказов.",
+                reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_MAIN)
+            )
+            return
+        
+        response = "🔖 Забронированные заказы:\n\n"
+        keyboard_buttons = []
+        
+        for order in reserved_orders:
+            response += f"---\n"
+            response += f"Заказ #{order.id}\n"
+            response += f"Дата создания: {order.created_at.strftime('%Y-%m-%d %H:%M')}\n"
+            response += f"Менеджер: {order.manager.username if order.manager else 'Неизвестно'}\n"
+            response += f"Клиент: {order.customer_phone}\n"
+            response += f"Адрес: {order.delivery_address}\n"
+            shipment_date_str = order.shipment_date.strftime('%d.%m.%Y') if order.shipment_date else 'Не указана'
+            response += f"🗓 Дата отгрузки: {shipment_date_str}\n"
+            
+            # Добавляем строку с продукцией (кратко)
+            products_count = len(order.products) if order.products else 0
+            joints_count = len(order.joints) if order.joints else 0
+            glue_count = sum(g.quantity for g in order.glues) if order.glues else 0
+            
+            response += f"📦 Продукция: {products_count} позиций, "
+            response += f"🔗 Стыки: {joints_count} позиций, "
+            response += f"🧴 Клей: {glue_count} шт.\n\n"
+            
+            # Добавляем кнопку для просмотра деталей заказа
+            keyboard_buttons.append([KeyboardButton(text=f"🔖 Заказ #{order.id}")])
+        
+        # Добавляем кнопку "Назад"
+        keyboard_buttons.append([KeyboardButton(text="◀️ Назад")])
+        
+        keyboard = ReplyKeyboardMarkup(
+            keyboard=keyboard_buttons,
+            resize_keyboard=True
+        )
+        
+        await message.answer(response, reply_markup=keyboard)
+        await state.set_state(MenuState.WAREHOUSE_RESERVED_ORDERS)
+        
+    except Exception as e:
+        logging.error(f"Ошибка при получении забронированных заказов: {e}", exc_info=True)
+        await message.answer(
+            "Произошла ошибка при загрузке забронированных заказов.",
+            reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_MAIN)
+        )
+    finally:
+        db.close()
+
+@router.message(StateFilter(MenuState.WAREHOUSE_RESERVED_ORDERS), F.text.regexp(r"^🔖 Заказ #(\d+)$"))
+async def view_reserved_order_warehouse(message: Message, state: FSMContext):
+    """Отображает детали забронированного заказа и предлагает подтвердить его"""
+    if not await check_warehouse_access(message):
+        return
+    
+    try:
+        # Извлекаем ID заказа из сообщения
+        order_id_match = re.search(r"^🔖 Заказ #(\d+)$", message.text)
+        if not order_id_match:
+            await message.answer(
+                "Неверный формат ID заказа.",
+                reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_RESERVED_ORDERS)
+            )
+            return
+        
+        order_id = int(order_id_match.group(1))
+        
+        db = next(get_db())
+        try:
+            # Получаем заказ
+            order = db.query(Order).options(
+                joinedload(Order.products),
+                joinedload(Order.joints),
+                joinedload(Order.glues),
+                joinedload(Order.manager)
+            ).filter(
+                Order.id == order_id,
+                Order.status == OrderStatus.RESERVED.value
+            ).first()
+            
+            if not order:
+                await message.answer(
+                    f"Забронированный заказ с ID {order_id} не найден или уже не имеет статус 'Забронирован'.",
+                    reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_RESERVED_ORDERS)
+                )
+                return
+            
+            # Формируем детальный ответ с информацией о заказе
+            response = f"🔖 Детали забронированного заказа #{order.id}\n\n"
+            response += f"Дата создания: {order.created_at.strftime('%Y-%m-%d %H:%M')}\n"
+            response += f"Менеджер: {order.manager.username if order.manager else 'Неизвестно'}\n"
+            response += f"Клиент: {order.customer_phone}\n"
+            response += f"Адрес: {order.delivery_address}\n"
+            shipment_date_str = order.shipment_date.strftime('%d.%m.%Y') if order.shipment_date else 'Не указана'
+            payment_method_str = order.payment_method if order.payment_method else 'Не указан'
+            response += f"🗓 Дата отгрузки: {shipment_date_str}\n"
+            response += f"💳 Способ оплаты: {payment_method_str}\n"
+            response += f"Монтаж: {'Да' if order.installation_required else 'Нет'}\n\n"
+            
+            response += "📦 Продукция:\n"
+            if order.products:
+                for item in order.products:
+                    response += f"- {item.color} ({item.thickness} мм): {item.quantity} шт.\n"
+            else:
+                response += "- нет\n"
+            
+            response += "\n🔗 Стыки:\n"
+            if order.joints:
+                for joint in order.joints:
+                    joint_type_name = "Другой"
+                    if joint.joint_type == JointType.SIMPLE.value:
+                        joint_type_name = "Простой"
+                    elif joint.joint_type == JointType.BUTTERFLY.value:
+                        joint_type_name = "Бабочка"
+                    elif joint.joint_type == JointType.CLOSING.value:
+                        joint_type_name = "Замыкающий"
+                    
+                    response += f"- {joint_type_name} ({joint.joint_thickness} мм, {joint.joint_color}): {joint.quantity} шт.\n"
+            else:
+                response += "- нет\n"
+            
+            response += "\n🧴 Клей:\n"
+            if order.glues:
+                for glue in order.glues:
+                    response += f"- {glue.quantity} шт.\n"
+            else:
+                response += "- нет\n"
+            
+            # Добавляем клавиатуру с кнопками для управления заказом
+            keyboard = ReplyKeyboardMarkup(
+                keyboard=[
+                    [KeyboardButton(text=f"✅ Подтвердить заказ #{order.id}"), KeyboardButton(text=f"❌ Отклонить заказ #{order.id}")],
+                    [KeyboardButton(text="◀️ К списку забронированных")]
+                ],
+                resize_keyboard=True
+            )
+            
+            await message.answer(response, reply_markup=keyboard)
+            await state.set_state(MenuState.WAREHOUSE_VIEW_RESERVED_ORDER)
+            await state.update_data(viewed_reserved_order_id=order.id)
+            
+        except Exception as e:
+            logging.error(f"Ошибка при просмотре забронированного заказа {order_id}: {e}", exc_info=True)
+            await message.answer(
+                "Произошла ошибка при загрузке деталей заказа.",
+                reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_RESERVED_ORDERS)
+            )
+        finally:
+            db.close()
+    except ValueError:
+        await message.answer(
+            "Неверный формат ID заказа.",
+            reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_RESERVED_ORDERS)
+        )
+
+@router.message(StateFilter(MenuState.WAREHOUSE_VIEW_RESERVED_ORDER), F.text.regexp(r"^✅ Подтвердить заказ #(\d+)$"))
+async def confirm_reserved_order_warehouse(message: Message, state: FSMContext):
+    """Подтверждает забронированный заказ и меняет его статус на NEW"""
+    if not await check_warehouse_access(message):
+        return
+    
+    try:
+        # Извлекаем ID заказа из сообщения
+        order_id_match = re.search(r"^✅ Подтвердить заказ #(\d+)$", message.text)
+        if not order_id_match:
+            await message.answer(
+                "Неверный формат ID заказа.",
+                reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_RESERVED_ORDERS)
+            )
+            return
+        
+        order_id = int(order_id_match.group(1))
+        
+        db = next(get_db())
+        try:
+            # Получаем заказ
+            order = db.query(Order).filter(
+                Order.id == order_id,
+                Order.status == OrderStatus.RESERVED.value
+            ).first()
+            
+            if not order:
+                await message.answer(
+                    f"Забронированный заказ с ID {order_id} не найден или уже не имеет статус 'Забронирован'.",
+                    reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_RESERVED_ORDERS)
+                )
+                return
+            
+            # Меняем статус заказа на NEW
+            order.status = OrderStatus.NEW.value
+            db.commit()
+            
+            # Отправляем уведомление менеджеру
+            try:
+                manager = db.query(User).filter(User.id == order.manager_id).first()
+                if manager and manager.telegram_id:
+                    await message.bot.send_message(
+                        manager.telegram_id,
+                        f"✅ Ваш забронированный заказ #{order.id} подтвержден складом и добавлен в очередь на обработку."
+                    )
+            except Exception as notify_error:
+                logging.error(f"Ошибка при отправке уведомления менеджеру: {notify_error}")
+            
+            await message.answer(
+                f"✅ Заказ #{order_id} успешно подтвержден и добавлен в очередь на обработку.",
+                reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_MAIN)
+            )
+            await state.set_state(MenuState.WAREHOUSE_MAIN)
+            
+        except Exception as e:
+            db.rollback()
+            logging.error(f"Ошибка при подтверждении забронированного заказа {order_id}: {e}", exc_info=True)
+            await message.answer(
+                f"❌ Произошла ошибка при подтверждении заказа: {str(e)}",
+                reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_MAIN)
+            )
+            await state.set_state(MenuState.WAREHOUSE_MAIN)
+        finally:
+            db.close()
+    except ValueError:
+        await message.answer(
+            "Неверный формат ID заказа.",
+            reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_RESERVED_ORDERS)
+        )
+
+@router.message(StateFilter(MenuState.WAREHOUSE_VIEW_RESERVED_ORDER), F.text.regexp(r"^❌ Отклонить заказ #(\d+)$"))
+async def reject_reserved_order_warehouse(message: Message, state: FSMContext):
+    """Отклоняет забронированный заказ и меняет его статус на CANCELLED"""
+    if not await check_warehouse_access(message):
+        return
+    
+    try:
+        # Извлекаем ID заказа из сообщения
+        order_id_match = re.search(r"^❌ Отклонить заказ #(\d+)$", message.text)
+        if not order_id_match:
+            await message.answer(
+                "Неверный формат ID заказа.",
+                reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_RESERVED_ORDERS)
+            )
+            return
+        
+        order_id = int(order_id_match.group(1))
+        
+        db = next(get_db())
+        try:
+            # Получаем заказ
+            order = db.query(Order).filter(
+                Order.id == order_id,
+                Order.status == OrderStatus.RESERVED.value
+            ).first()
+            
+            if not order:
+                await message.answer(
+                    f"Забронированный заказ с ID {order_id} не найден или уже не имеет статус 'Забронирован'.",
+                    reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_RESERVED_ORDERS)
+                )
+                return
+            
+            # Меняем статус заказа на CANCELLED
+            order.status = OrderStatus.CANCELLED.value
+            db.commit()
+            
+            # Отправляем уведомление менеджеру
+            try:
+                manager = db.query(User).filter(User.id == order.manager_id).first()
+                if manager and manager.telegram_id:
+                    await message.bot.send_message(
+                        manager.telegram_id,
+                        f"❌ Ваш забронированный заказ #{order.id} был отклонен складом."
+                    )
+            except Exception as notify_error:
+                logging.error(f"Ошибка при отправке уведомления менеджеру: {notify_error}")
+            
+            await message.answer(
+                f"❌ Заказ #{order_id} отклонен.",
+                reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_MAIN)
+            )
+            await state.set_state(MenuState.WAREHOUSE_MAIN)
+            
+        except Exception as e:
+            db.rollback()
+            logging.error(f"Ошибка при отклонении забронированного заказа {order_id}: {e}", exc_info=True)
+            await message.answer(
+                f"❌ Произошла ошибка при отклонении заказа: {str(e)}",
+                reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_MAIN)
+            )
+            await state.set_state(MenuState.WAREHOUSE_MAIN)
+        finally:
+            db.close()
+    except ValueError:
+        await message.answer(
+            "Неверный формат ID заказа.",
+            reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_RESERVED_ORDERS)
+        )
+
+@router.message(StateFilter(MenuState.WAREHOUSE_VIEW_RESERVED_ORDER), F.text == "◀️ К списку забронированных")
+async def back_to_reserved_orders_list(message: Message, state: FSMContext):
+    """Возвращает к списку забронированных заказов"""
+    if not await check_warehouse_access(message):
+        return
+    
+    await handle_reserved_orders_warehouse(message, state)

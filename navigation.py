@@ -29,6 +29,8 @@ class MenuState(str, Enum):
     WAREHOUSE_VIEW_COMPLETED_ORDER = "warehouse_view_completed_order"
     WAREHOUSE_RETURN_REQUESTS = "warehouse_return_requests"
     VIEW_RETURN_REQUEST = "view_return_request"
+    WAREHOUSE_RESERVED_ORDERS = "warehouse_reserved_orders"
+    WAREHOUSE_VIEW_RESERVED_ORDER = "warehouse_view_reserved_order"
     
     # Подменю продаж
     SALES_ORDER = "sales_order"
@@ -38,6 +40,8 @@ class MenuState(str, Enum):
     SALES_ORDER_CONFIRM = "sales_order_confirm"  # Подтверждение заказа
     SALES_COMPLETED_ORDERS = "sales_completed_orders"
     SALES_VIEW_COMPLETED_ORDER = "sales_view_completed_order"
+    SALES_RESERVED_ORDERS = "sales_reserved_orders"
+    SALES_VIEW_RESERVED_ORDER = "sales_view_reserved_order"
     
     # Подменю супер-админа
     SUPER_ADMIN_USERS = "super_admin_users"
@@ -74,6 +78,8 @@ MENU_NAVIGATION = {
     MenuState.WAREHOUSE_VIEW_COMPLETED_ORDER: MenuState.WAREHOUSE_COMPLETED_ORDERS,
     MenuState.WAREHOUSE_RETURN_REQUESTS: MenuState.WAREHOUSE_MAIN,
     MenuState.VIEW_RETURN_REQUEST: MenuState.WAREHOUSE_RETURN_REQUESTS,
+    MenuState.WAREHOUSE_RESERVED_ORDERS: MenuState.WAREHOUSE_MAIN,
+    MenuState.WAREHOUSE_VIEW_RESERVED_ORDER: MenuState.WAREHOUSE_RESERVED_ORDERS,
     MenuState.WAREHOUSE_MAIN: MenuState.SUPER_ADMIN_MAIN,  # Для возврата из роли склада в супер админа
     
     # Инвентарь - новые состояния для всех ролей
@@ -92,6 +98,8 @@ MENU_NAVIGATION = {
     MenuState.SALES_ORDER_CONFIRM: MenuState.SALES_CREATE_ORDER,  # Возврат к созданию заказа
     MenuState.SALES_COMPLETED_ORDERS: MenuState.SALES_MAIN,
     MenuState.SALES_VIEW_COMPLETED_ORDER: MenuState.SALES_COMPLETED_ORDERS,
+    MenuState.SALES_RESERVED_ORDERS: MenuState.SALES_MAIN,
+    MenuState.SALES_VIEW_RESERVED_ORDER: MenuState.SALES_RESERVED_ORDERS,
     MenuState.SALES_MAIN: MenuState.SUPER_ADMIN_MAIN,  # Для возврата из роли продаж в супер админа
     
     # Супер-админ
@@ -172,6 +180,7 @@ def get_menu_keyboard(menu_state: MenuState, is_admin_context: bool = False) -> 
             [KeyboardButton(text="📝 Составить заказ")],
             [KeyboardButton(text="📝 Заказать")],
             [KeyboardButton(text="✅ Завершенные заказы")],
+            [KeyboardButton(text="🔖 Забронированные заказы")],
             [KeyboardButton(text="📊 Остатки")],
         ],
         
@@ -193,7 +202,9 @@ def get_menu_keyboard(menu_state: MenuState, is_admin_context: bool = False) -> 
         ],
         
         MenuState.SALES_ORDER_CONFIRM: [
-            [KeyboardButton(text="✅ Подтвердить"), KeyboardButton(text="❌ Отменить"), KeyboardButton(text="◀️ Назад")]
+            [KeyboardButton(text="✅ Оформить заказ"), KeyboardButton(text="🔖 Бронировать")],
+            [KeyboardButton(text="❌ Отменить заказ")],
+            [KeyboardButton(text="◀️ Назад")]
         ],
         
         MenuState.SALES_COMPLETED_ORDERS: [
@@ -206,7 +217,8 @@ def get_menu_keyboard(menu_state: MenuState, is_admin_context: bool = False) -> 
         # Главное меню склада
         MenuState.WAREHOUSE_MAIN: [
             [KeyboardButton(text="📦 Остатки"), KeyboardButton(text="📦 Мои заказы")],
-            [KeyboardButton(text="✅ Завершенные заказы"), KeyboardButton(text="♻️ Запросы на возврат")]
+            [KeyboardButton(text="✅ Завершенные заказы"), KeyboardButton(text="♻️ Запросы на возврат")],
+            [KeyboardButton(text="🔖 Забронированные заказы")]
         ],
         
         # Подменю склада
