@@ -487,8 +487,16 @@ async def button_china_order(message: Message, state: FSMContext):
             await message.answer("У вас нет прав для создания заказа в Китай.", parse_mode="Markdown")
             return
             
-        # Здесь будет логика обработки заказа в Китай
-        await message.answer("Функционал заказа в Китай временно недоступен.", parse_mode="Markdown")
+        # Устанавливаем состояние для заказа в Китай
+        await state.set_state(MenuState.SUPER_ADMIN_CHINA_ORDER)
+        
+        # Отправляем форму для заказа 
+        await message.answer(
+            "🇨🇳 Создание заказа в Китай\n\n"
+            "Выберите категорию товаров для заказа:",
+            reply_markup=get_menu_keyboard(MenuState.SUPER_ADMIN_CHINA_ORDER),
+            parse_mode="Markdown"
+        )
     finally:
         db.close()
 
@@ -603,6 +611,42 @@ def create_default_user_if_not_exists():
             db.close()
     except Exception as e:
         logging.error(f"Error creating default admin user: {e}")
+
+# Функция для назначения роли пользователю (для кнопок ролей)
+async def assign_role(message: Message, state: FSMContext, role: UserRole, role_name: str, **kwargs):
+    """Эмуляция роли для супер-администратора"""
+    db = next(get_db())
+    try:
+        user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
+        if not user or user.role != UserRole.SUPER_ADMIN:
+            await message.answer("У вас нет прав для эмуляции ролей.", **kwargs)
+            return
+            
+        # Устанавливаем флаг контекста админа
+        await state.update_data(is_admin_context=True)
+        
+        # Переключаемся на соответствующее главное меню роли
+        main_menu_state = {
+            UserRole.SUPER_ADMIN: MenuState.SUPER_ADMIN_MAIN,
+            UserRole.SALES_MANAGER: MenuState.SALES_MAIN,
+            UserRole.WAREHOUSE: MenuState.WAREHOUSE_MAIN,
+            UserRole.PRODUCTION: MenuState.PRODUCTION_MAIN,
+            UserRole.NONE: None,  # Для роли NONE нет главного меню
+        }[role]
+        
+        await state.set_state(main_menu_state)
+        
+        # Получаем клавиатуру для выбранной роли с доп. кнопкой возврата в админку
+        keyboard = get_menu_keyboard(main_menu_state, is_admin_context=True)
+        
+        await message.answer(
+            f"✅ Вы временно переключились в режим {role_name}.\n"
+            f"Для возврата в меню администратора используйте кнопку 🔙 Назад в админку",
+            reply_markup=keyboard,
+            **kwargs
+        )
+    finally:
+        db.close()
 
 # Основная функция запуска бота
 async def main():
