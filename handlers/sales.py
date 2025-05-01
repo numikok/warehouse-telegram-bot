@@ -3039,13 +3039,19 @@ async def process_booking_order_selection(message: Message, state: FSMContext):
         
         # Проверяем, что заказ имеет статус NEW
         if order.status != OrderStatus.NEW.value:
+            status_str = str(order.status)
+            # Если статус является enum объектом, извлекаем его value
+            if hasattr(order.status, 'value'):
+                status_str = str(order.status.value)
+                
             await message.answer(
-                f"⚠️ Заказ #{order_id} не может быть забронирован, так как его статус: {order.status}",
+                f"⚠️ Заказ #{order_id} не может быть забронирован, так как его статус: {status_str}",
                 reply_markup=ReplyKeyboardMarkup(
                     keyboard=[[KeyboardButton(text="◀️ Назад")]],
                     resize_keyboard=True
                 )
             )
+            await state.set_state(MenuState.SALES_MAIN)
             return
         
         # Сохраняем ID заказа в контексте состояния
@@ -3157,8 +3163,13 @@ async def confirm_booking(message: Message, state: FSMContext):
             return
         
         if order.status != OrderStatus.NEW.value:
+            status_str = str(order.status)
+            # Если статус является enum объектом, извлекаем его value
+            if hasattr(order.status, 'value'):
+                status_str = str(order.status.value)
+                
             await message.answer(
-                f"⚠️ Заказ #{order_id} не может быть забронирован, так как его статус: {order.status}",
+                f"⚠️ Заказ #{order_id} не может быть забронирован, так как его статус: {status_str}",
                 reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
             )
             await state.set_state(MenuState.SALES_MAIN)
