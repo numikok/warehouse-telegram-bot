@@ -144,6 +144,9 @@ class SalesStates(StatesGroup):
     waiting_for_booking_order_selection = State()
     waiting_for_booking_confirmation = State()
     
+    # Состояние для работы с забронированными заказами
+    waiting_for_reserved_order_selection = State()
+    
 class AdminStates(StatesGroup):
     waiting_for_user_id = State()
     waiting_for_role = State()

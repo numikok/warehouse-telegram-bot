@@ -2524,7 +2524,10 @@ async def view_completed_order_sales(message: Message, state: FSMContext):
 
     except Exception as e:
         logging.error(f"(Sales) Ошибка при просмотре завершенного заказа {completed_order_id}: {e}", exc_info=True)
-        await message.answer("Произошла ошибка при загрузке деталей заказа.", reply_markup=get_menu_keyboard(MenuState.SALES_COMPLETED_ORDERS))
+        await message.answer(
+            "Произошла ошибка при загрузке деталей заказа.",
+            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
+        )
     finally:
         db.close()
 
@@ -2576,7 +2579,7 @@ async def view_completed_order_sales(message: Message, state: FSMContext):
     finally:
         db.close()
 
-@router.message(StateFilter(MenuState.SALES_RESERVED_ORDERS), F.text.regexp(r'^\d+$'))
+@router.message(StateFilter(SalesStates.waiting_for_reserved_order_selection), F.text.regexp(r'^\d+$'))
 async def view_reserved_order_sales(message: Message, state: FSMContext):
     """Отображает детали одного забронированного заказа"""
     if not await check_sales_access(message):
@@ -2591,7 +2594,7 @@ async def view_reserved_order_sales(message: Message, state: FSMContext):
     except ValueError:
         await message.answer(
             "Пожалуйста, введите корректный числовой ID.",
-            reply_markup=get_menu_keyboard(MenuState.SALES_RESERVED_ORDERS, is_admin_context=is_admin_context)
+            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
         )
         return
     
@@ -2609,7 +2612,7 @@ async def view_reserved_order_sales(message: Message, state: FSMContext):
         if not order:
             await message.answer(
                 f"Забронированный заказ с ID {order_id} не найден или не имеет статус 'Забронирован'.",
-                reply_markup=get_menu_keyboard(MenuState.SALES_RESERVED_ORDERS, is_admin_context=is_admin_context)
+                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
             )
             return
         
@@ -2671,7 +2674,7 @@ async def view_reserved_order_sales(message: Message, state: FSMContext):
         logging.error(f"Ошибка при просмотре забронированного заказа: {e}", exc_info=True)
         await message.answer(
             "Произошла ошибка при загрузке деталей заказа.",
-            reply_markup=get_menu_keyboard(MenuState.SALES_RESERVED_ORDERS, is_admin_context=is_admin_context)
+            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
         )
     finally:
         db.close()
@@ -3235,7 +3238,8 @@ async def handle_reserved_orders(message: Message, state: FSMContext):
     state_data = await state.get_data()
     is_admin_context = state_data.get("is_admin_context", False)
     
-    await state.set_state(MenuState.SALES_RESERVED_ORDERS)
+    # Устанавливаем состояние ожидания выбора забронированного заказа
+    await state.set_state(SalesStates.waiting_for_reserved_order_selection)
     db = next(get_db())
     try:
         user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
