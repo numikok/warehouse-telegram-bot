@@ -3015,62 +3015,8 @@ async def confirm_booking(message: Message, state: FSMContext):
             await state.set_state(MenuState.SALES_MAIN)
             return
         
-        # Проверка наличия товаров на складе и резервирование
-        stock_issues = []
-        
-        # Проверка панелей
-        for item in order.products:
-            # Проверяем наличие готовой продукции
-            finished_product = db.query(FinishedProduct).filter(
-                FinishedProduct.film_id == db.query(Film.id).filter(Film.code == item.color).scalar_subquery(),
-                FinishedProduct.thickness == item.thickness
-            ).first()
-            
-            if not finished_product or finished_product.quantity < item.quantity:
-                available = finished_product.quantity if finished_product else 0
-                stock_issues.append(f"Панель {item.color} ({item.thickness} мм): требуется {item.quantity}, доступно {available}")
-            elif finished_product:
-                # Резервируем продукцию
-                finished_product.quantity -= item.quantity
-        
-        # Проверка стыков
-        for joint in order.joints:
-            db_joint = db.query(Joint).filter(
-                Joint.type == joint.joint_type,
-                Joint.color == joint.joint_color,
-                Joint.thickness == joint.joint_thickness
-            ).first()
-            
-            if not db_joint or db_joint.quantity < joint.quantity:
-                available = db_joint.quantity if db_joint else 0
-                joint_type_name = "Бабочка" if joint.joint_type == JointType.BUTTERFLY else "Простой" if joint.joint_type == JointType.SIMPLE else "Замыкающий"
-                stock_issues.append(f"Стык {joint_type_name} {joint.joint_color} ({joint.joint_thickness} мм): требуется {joint.quantity}, доступно {available}")
-            elif db_joint:
-                # Резервируем стыки
-                db_joint.quantity -= joint.quantity
-        
-        # Проверка клея
-        if order.glues:
-            total_glue_needed = sum(glue.quantity for glue in order.glues)
-            glue_stock = db.query(Glue).first()
-            
-            if not glue_stock or glue_stock.quantity < total_glue_needed:
-                available = glue_stock.quantity if glue_stock else 0
-                stock_issues.append(f"Клей: требуется {total_glue_needed}, доступно {available}")
-            elif glue_stock:
-                # Резервируем клей
-                glue_stock.quantity -= total_glue_needed
-        
-        if stock_issues:
-            issue_text = "\n".join(stock_issues)
-            await message.answer(
-                f"⚠️ Невозможно забронировать заказ из-за нехватки товаров на складе:\n\n{issue_text}",
-                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
-            )
-            await state.set_state(MenuState.SALES_MAIN)
-            return
-        
-        # Меняем статус заказа на RESERVED
+        # Упрощенная логика - просто меняем статус заказа на RESERVED
+        # без дополнительных проверок наличия товаров
         order.status = OrderStatus.RESERVED
         
         # Записываем, кто забронировал заказ
@@ -3082,7 +3028,7 @@ async def confirm_booking(message: Message, state: FSMContext):
         
         await message.answer(
             f"✅ Заказ #{order_id} успешно забронирован!\n\n"
-            f"Товары зарезервированы на складе. Вы можете просмотреть забронированные заказы через меню '🔖 Забронированные заказы'.",
+            f"Вы можете просмотреть забронированные заказы через меню '🔖 Забронированные заказы'.",
             reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
         )
         await state.set_state(MenuState.SALES_MAIN)
