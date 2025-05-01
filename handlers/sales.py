@@ -1738,7 +1738,7 @@ async def handle_warehouse_order(message: Message, state: FSMContext):
     finally:
         db.close()
 
-@router.message(F.text == "📦 Количество готовой продукции")
+@router.message(F.text.in_(["📦 Количество готовой продукции", "📦 Готовая продукция"]))
 async def handle_stock(message: Message, state: FSMContext):
     if not await check_sales_access(message):
         return
