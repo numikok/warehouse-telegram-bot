@@ -217,9 +217,12 @@ def get_menu_keyboard(menu_state: MenuState, is_admin_context: bool = False) -> 
         
         # Главное меню склада
         MenuState.WAREHOUSE_MAIN: [
-            [KeyboardButton(text="📦 Остатки"), KeyboardButton(text="📦 Мои заказы")],
-            [KeyboardButton(text="✅ Завершенные заказы"), KeyboardButton(text="♻️ Запросы на возврат")],
-            [KeyboardButton(text="🔖 Забронированные заказы")]
+            [KeyboardButton(text="✅ Подтвердить отгрузку")], 
+            [KeyboardButton(text="📦 Мои заказы")],
+            [KeyboardButton(text="📦 Остатки")],
+            [KeyboardButton(text="♻️ Запросы на возврат")],
+            [KeyboardButton(text="🔖 Забронированные заказы")],
+            [KeyboardButton(text="✅ Завершенные заказы")]
         ],
         
         # Подменю склада

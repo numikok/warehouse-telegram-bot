@@ -1772,7 +1772,7 @@ async def view_reserved_order_warehouse(message: Message, state: FSMContext):
 
 @router.message(StateFilter(MenuState.WAREHOUSE_VIEW_RESERVED_ORDER), F.text.regexp(r"^✅ Подтвердить заказ #(\d+)$"))
 async def confirm_reserved_order_warehouse(message: Message, state: FSMContext):
-    """Подтверждает забронированный заказ и меняет его статус на NEW"""
+    """Подтверждает забронированный заказ и меняет его статус на PENDING"""
     if not await check_warehouse_access(message):
         return
     
@@ -1794,6 +1794,10 @@ async def confirm_reserved_order_warehouse(message: Message, state: FSMContext):
             order = db.query(Order).filter(
                 Order.id == order_id,
                 Order.status == OrderStatus.RESERVED.value
+            ).options(
+                joinedload(Order.products),
+                joinedload(Order.joints),
+                joinedload(Order.glues)
             ).first()
             
             if not order:
@@ -1803,8 +1807,66 @@ async def confirm_reserved_order_warehouse(message: Message, state: FSMContext):
                 )
                 return
             
-            # Меняем статус заказа на NEW
-            order.status = OrderStatus.NEW.value
+            # Возвращаем товары на склад
+            if order.products:
+                for product in order.products:
+                    # Находим соответствующий товар на складе
+                    finished_product = db.query(FinishedProduct).join(
+                        Film, FinishedProduct.film_id == Film.id
+                    ).filter(
+                        Film.code == product.color,
+                        FinishedProduct.thickness == product.thickness
+                    ).first()
+                    
+                    if finished_product:
+                        # Увеличиваем количество на складе
+                        finished_product.quantity += product.quantity
+                    else:
+                        # Если такого товара нет, создаем новую запись
+                        film = db.query(Film).filter(Film.code == product.color).first()
+                        if film:
+                            new_product = FinishedProduct(
+                                film_id=film.id,
+                                quantity=product.quantity,
+                                thickness=product.thickness
+                            )
+                            db.add(new_product)
+            
+            # Возвращаем стыки на склад
+            if order.joints:
+                for joint in order.joints:
+                    joint_item = db.query(Joint).filter(
+                        Joint.type == joint.joint_type,
+                        Joint.color == joint.joint_color,
+                        Joint.thickness == joint.joint_thickness
+                    ).first()
+                    
+                    if joint_item:
+                        # Увеличиваем количество стыков
+                        joint_item.quantity += joint.quantity
+                    else:
+                        # Если таких стыков нет, создаем новую запись
+                        new_joint = Joint(
+                            type=joint.joint_type,
+                            color=joint.joint_color,
+                            thickness=joint.joint_thickness,
+                            quantity=joint.quantity
+                        )
+                        db.add(new_joint)
+            
+            # Возвращаем клей на склад
+            if order.glues:
+                total_glue = sum(glue.quantity for glue in order.glues)
+                if total_glue > 0:
+                    glue_item = db.query(Glue).first()
+                    if glue_item:
+                        glue_item.quantity += total_glue
+                    else:
+                        new_glue = Glue(quantity=total_glue)
+                        db.add(new_glue)
+            
+            # Меняем статус заказа на PENDING
+            order.status = OrderStatus.PENDING.value
             db.commit()
             
             # Отправляем уведомление менеджеру
@@ -1813,13 +1875,13 @@ async def confirm_reserved_order_warehouse(message: Message, state: FSMContext):
                 if manager and manager.telegram_id:
                     await message.bot.send_message(
                         manager.telegram_id,
-                        f"✅ Ваш забронированный заказ #{order.id} подтвержден складом и добавлен в очередь на обработку."
+                        f"✅ Ваш забронированный заказ #{order.id} подтвержден складом и переведен в статус ожидания. Материалы возвращены на склад."
                     )
             except Exception as notify_error:
                 logging.error(f"Ошибка при отправке уведомления менеджеру: {notify_error}")
             
             await message.answer(
-                f"✅ Заказ #{order_id} успешно подтвержден и добавлен в очередь на обработку.",
+                f"✅ Заказ #{order_id} успешно подтвержден. Материалы возвращены на склад.",
                 reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_MAIN)
             )
             await state.set_state(MenuState.WAREHOUSE_MAIN)
@@ -1943,3 +2005,12 @@ async def reserved_orders_back_to_main_warehouse(message: Message, state: FSMCon
         "Выберите действие:",
         reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_MAIN, is_admin_context=is_admin_context)
     )
+
+@router.message(F.text == "✅ Подтвердить отгрузку")
+async def handle_confirm_order(message: Message, state: FSMContext):
+    """Обработка нажатия на кнопку 'Подтвердить отгрузку'"""
+    if not await check_warehouse_access(message):
+        return
+    
+    # Вызываем функцию для отображения активных заказов
+    await display_active_orders(message, state)
