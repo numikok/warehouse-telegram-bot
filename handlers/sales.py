@@ -3408,3 +3408,16 @@ async def reserved_orders_back_to_main(message: Message, state: FSMContext):
         "Вы вернулись в главное меню.",
         reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
     )
+
+@router.message(StateFilter(MenuState.SALES_COMPLETED_ORDERS), F.text == "◀️ Назад")
+async def completed_orders_back_to_main(message: Message, state: FSMContext):
+    """Обработчик возврата из просмотра завершенных заказов в главное меню продаж"""
+    # Получаем флаг админ-контекста
+    state_data = await state.get_data()
+    is_admin_context = state_data.get("is_admin_context", False)
+    
+    await state.set_state(MenuState.SALES_MAIN)
+    await message.answer(
+        "Выберите действие:",
+        reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
+    )
