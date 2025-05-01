@@ -3251,10 +3251,10 @@ async def handle_reserved_orders(message: Message, state: FSMContext):
             return
         
         # Получаем забронированные заказы
-        query = db.query(Order).filter(Order.status == OrderStatus.RESERVED)
+        query = db.query(Order).filter(Order.status == OrderStatus.RESERVED.value)
         
         # Для обычных менеджеров показываем только их заказы, для админов - все
-        if user.role != UserRole.SUPER_ADMIN.value and user.role != UserRole.ADMIN.value:
+        if user.role != UserRole.SUPER_ADMIN.value:
             query = query.filter(Order.manager_id == user.id)
         
         reserved_orders = query.order_by(desc(Order.created_at)).all()
@@ -3272,7 +3272,7 @@ async def handle_reserved_orders(message: Message, state: FSMContext):
             response += f"Дата создания: {order.created_at.strftime('%Y-%m-%d %H:%M')}\n"
             
             # Добавляем информацию о менеджере для админов
-            if user.role in [UserRole.SUPER_ADMIN.value, UserRole.ADMIN.value] and order.manager_id:
+            if user.role == UserRole.SUPER_ADMIN.value and order.manager_id:
                 manager = db.query(User).filter(User.id == order.manager_id).first()
                 if manager:
                     response += f"Менеджер: {manager.username or manager.full_name or 'ID: ' + str(manager.id)}\n"
