@@ -1917,3 +1917,29 @@ async def back_to_reserved_orders_list(message: Message, state: FSMContext):
         return
     
     await handle_reserved_orders_warehouse(message, state)
+
+@router.message(StateFilter(MenuState.WAREHOUSE_COMPLETED_ORDERS), F.text == "◀️ Назад")
+async def completed_orders_back_to_main_warehouse(message: Message, state: FSMContext):
+    """Обработчик возврата из просмотра завершенных заказов в главное меню склада"""
+    # Получаем флаг админ-контекста
+    state_data = await state.get_data()
+    is_admin_context = state_data.get("is_admin_context", False)
+    
+    await state.set_state(MenuState.WAREHOUSE_MAIN)
+    await message.answer(
+        "Выберите действие:",
+        reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_MAIN, is_admin_context=is_admin_context)
+    )
+
+@router.message(StateFilter(MenuState.WAREHOUSE_RESERVED_ORDERS), F.text == "◀️ Назад")
+async def reserved_orders_back_to_main_warehouse(message: Message, state: FSMContext):
+    """Обработчик возврата из просмотра забронированных заказов в главное меню склада"""
+    # Получаем флаг админ-контекста
+    state_data = await state.get_data()
+    is_admin_context = state_data.get("is_admin_context", False)
+    
+    await state.set_state(MenuState.WAREHOUSE_MAIN)
+    await message.answer(
+        "Выберите действие:",
+        reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_MAIN, is_admin_context=is_admin_context)
+    )
