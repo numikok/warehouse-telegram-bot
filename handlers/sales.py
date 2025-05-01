@@ -3037,6 +3037,12 @@ async def process_booking_order_selection(message: Message, state: FSMContext):
             )
             return
         
+        # Отладочный вывод
+        status_debug = f"Статус: {order.status}, Тип: {type(order.status)}"
+        if hasattr(order.status, 'value'):
+            status_debug += f", Значение: {order.status.value}, Тип значения: {type(order.status.value)}"
+        await message.answer(f"Отладка: {status_debug}")
+        
         # Проверяем, что заказ имеет статус NEW - только такие заказы можно бронировать
         if order.status != "NEW":
             await message.answer(
