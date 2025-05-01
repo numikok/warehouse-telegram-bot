@@ -2541,7 +2541,7 @@ async def view_completed_order_sales(message: Message, state: FSMContext):
         
         # Получаем забронированные заказы этого менеджера
         reserved_orders = db.query(Order).filter(
-            Order.status == OrderStatus.RESERVED.value,
+            Order.status == "reserved",
             Order.manager_id == user.id
         ).order_by(desc(Order.created_at)).all()
         
@@ -2606,7 +2606,7 @@ async def view_reserved_order_sales(message: Message, state: FSMContext):
             joinedload(Order.glues)
         ).filter(
             Order.id == order_id,
-            Order.status == OrderStatus.RESERVED.value
+            Order.status == "reserved"
         ).first()
         
         if not order:
@@ -2697,7 +2697,7 @@ async def process_confirm_reserved_order(callback_query: CallbackQuery, state: F
         # Получаем заказ
         order = db.query(Order).filter(
             Order.id == order_id,
-            Order.status == OrderStatus.RESERVED.value
+            Order.status == "reserved"
         ).first()
         
         if not order:
@@ -2764,9 +2764,9 @@ async def process_cancel_reserved_order(callback_query: CallbackQuery, state: FS
             return
         
         # Проверяем статус заказа
-        if order.status != OrderStatus.RESERVED.value:
+        if order.status != "reserved":
             await callback_query.message.answer(
-                f"⚠️ Заказ #{order_id} не может быть отменен, так как его статус: {order.status.value}",
+                f"⚠️ Заказ #{order_id} не может быть отменен, так как его статус: {order.status}",
                 reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
             )
             await state.set_state(MenuState.SALES_MAIN)
@@ -3171,8 +3171,8 @@ async def confirm_booking(message: Message, state: FSMContext):
                     await state.set_state(MenuState.SALES_MAIN)
                     return
         
-        # Используем перечисление OrderStatus вместо строкового значения
-        order.status = OrderStatus.RESERVED.value
+        # Используем строковое значение напрямую для совместимости с базой данных
+        order.status = "reserved"
         
         # Записываем, кто забронировал заказ
         user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
@@ -3251,7 +3251,7 @@ async def handle_reserved_orders(message: Message, state: FSMContext):
             return
         
         # Получаем забронированные заказы
-        query = db.query(Order).filter(Order.status == OrderStatus.RESERVED.value)
+        query = db.query(Order).filter(Order.status == "reserved")
         
         # Для обычных менеджеров показываем только их заказы, для админов - все
         if user.role != UserRole.SUPER_ADMIN.value:
