@@ -128,12 +128,13 @@ class ProductionOrder(Base):
     manager = relationship("User", foreign_keys=[manager_id]) 
 
 class OrderStatus(enum.Enum):
-    NEW = "new"
-    IN_PROGRESS = "in_progress"
-    COMPLETED = "completed"
-    CANCELLED = "cancelled"
-    CREATED = "created"
-    RESERVED = "reserved"  # Новый статус для бронирования заказов
+    NEW = "NEW"
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETED = "COMPLETED"
+    CANCELLED = "CANCELLED"
+    CREATED = "CREATED"
+    RESERVED = "RESERVED"  # Изменено на верхний регистр для соответствия в базе данных
+    PENDING = "PENDING"    # Добавлено значение для статуса "в ожидании"
 
 class OrderJoint(Base):
     __tablename__ = "order_joints"
@@ -186,7 +187,7 @@ class Order(Base):
     delivery_address = Column(String, nullable=True)
     shipment_date = Column(Date, nullable=True)
     payment_method = Column(String, nullable=True)
-    status = Column(SQLEnum(OrderStatus), nullable=False, default=OrderStatus.NEW)
+    status = Column(SQLEnum(OrderStatus), nullable=False, default=OrderStatus.NEW.value)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     completed_at = Column(DateTime(timezone=True), nullable=True)
