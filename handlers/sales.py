@@ -3040,7 +3040,7 @@ async def process_booking_order_selection(message: Message, state: FSMContext):
         # Проверяем, что заказ имеет статус NEW
         if order.status != OrderStatus.NEW.value:
             await message.answer(
-                f"⚠️ Заказ #{order_id} не может быть забронирован, так как его статус: {order.status.name if hasattr(order.status, 'name') else order.status}",
+                f"⚠️ Заказ #{order_id} не может быть забронирован, так как его статус: {order.status}",
                 reply_markup=ReplyKeyboardMarkup(
                     keyboard=[[KeyboardButton(text="◀️ Назад")]],
                     resize_keyboard=True
@@ -3158,7 +3158,7 @@ async def confirm_booking(message: Message, state: FSMContext):
         
         if order.status != OrderStatus.NEW.value:
             await message.answer(
-                f"⚠️ Заказ #{order_id} не может быть забронирован, так как его статус: {order.status.name if hasattr(order.status, 'name') else order.status}",
+                f"⚠️ Заказ #{order_id} не может быть забронирован, так как его статус: {order.status}",
                 reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
             )
             await state.set_state(MenuState.SALES_MAIN)
