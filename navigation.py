@@ -183,6 +183,7 @@ def get_menu_keyboard(menu_state: MenuState, is_admin_context: bool = False) -> 
             [KeyboardButton(text="🔖 Забронированные заказы")],
             [KeyboardButton(text="📦 Готовая продукция")],
             [KeyboardButton(text="🔖 Бронь")],
+            [KeyboardButton(text="Заказ в Китай")],
         ],
         
         # Подменю продаж
