@@ -2729,23 +2729,26 @@ async def process_confirm_reserved_order(callback_query: CallbackQuery, state: F
 
 @router.callback_query(lambda c: c.data.startswith("cancel_reserved:"))
 async def process_cancel_reserved_order(callback_query: CallbackQuery, state: FSMContext):
-    """Обработка отмены забронированного заказа"""
-    await callback_query.answer()
-    
-    # Извлекаем ID заказа из callback_data
+    """Обработчик отмены забронированного заказа"""
     order_id = int(callback_query.data.split(":")[1])
     
     db = next(get_db())
     try:
-        # Получаем заказ
-        order = db.query(Order).filter(
-            Order.id == order_id,
-            Order.status == OrderStatus.RESERVED
-        ).first()
+        # Получаем заказ по ID
+        order = db.query(Order).filter(Order.id == order_id).first()
         
         if not order:
             await callback_query.message.answer(
-                "Заказ не найден или уже не имеет статус 'Забронирован'.",
+                f"❌ Заказ #{order_id} не найден.",
+                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+            )
+            await state.set_state(MenuState.SALES_MAIN)
+            return
+        
+        # Проверяем статус заказа
+        if order.status != OrderStatus.RESERVED:
+            await callback_query.message.answer(
+                f"⚠️ Заказ #{order_id} не может быть отменен, так как его статус: {order.status.value}",
                 reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
             )
             await state.set_state(MenuState.SALES_MAIN)
@@ -2761,19 +2764,76 @@ async def process_cancel_reserved_order(callback_query: CallbackQuery, state: FS
             await state.set_state(MenuState.SALES_MAIN)
             return
         
+        # Возвращаем товары на склад
+        if order.products:
+            for product in order.products:
+                # Находим соответствующий товар на складе
+                finished_product = db.query(FinishedProduct).join(
+                    Film, FinishedProduct.film_id == Film.id
+                ).filter(
+                    Film.code == product.color,
+                    FinishedProduct.thickness == product.thickness
+                ).first()
+                
+                if finished_product:
+                    # Увеличиваем количество на складе
+                    finished_product.quantity += product.quantity
+                else:
+                    # Если такого товара нет, создаем новую запись
+                    film = db.query(Film).filter(Film.code == product.color).first()
+                    if film:
+                        new_product = FinishedProduct(
+                            film_id=film.id,
+                            quantity=product.quantity,
+                            thickness=product.thickness
+                        )
+                        db.add(new_product)
+        
+        # Возвращаем стыки на склад
+        if order.joints:
+            for joint in order.joints:
+                joint_item = db.query(Joint).filter(
+                    Joint.type == joint.joint_type,
+                    Joint.color == joint.joint_color,
+                    Joint.thickness == joint.joint_thickness
+                ).first()
+                
+                if joint_item:
+                    # Увеличиваем количество стыков
+                    joint_item.quantity += joint.quantity
+                else:
+                    # Если таких стыков нет, создаем новую запись
+                    new_joint = Joint(
+                        type=joint.joint_type,
+                        color=joint.joint_color,
+                        thickness=joint.joint_thickness,
+                        quantity=joint.quantity
+                    )
+                    db.add(new_joint)
+        
+        # Возвращаем клей на склад
+        if order.glues:
+            total_glue = sum(glue.quantity for glue in order.glues)
+            if total_glue > 0:
+                glue_item = db.query(Glue).first()
+                if glue_item:
+                    glue_item.quantity += total_glue
+                else:
+                    new_glue = Glue(quantity=total_glue)
+                    db.add(new_glue)
+        
         # Меняем статус заказа на CANCELLED
         order.status = OrderStatus.CANCELLED
         db.commit()
         
         await callback_query.message.answer(
-            f"❌ Заказ #{order_id} отменен.",
+            f"❌ Заказ #{order_id} отменен. Товары возвращены на склад.",
             reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
         )
         await state.set_state(MenuState.SALES_MAIN)
         
     except Exception as e:
         db.rollback()
-        logging.error(f"Ошибка при отмене забронированного заказа {order_id}: {e}", exc_info=True)
         await callback_query.message.answer(
             f"❌ Произошла ошибка при отмене заказа: {str(e)}",
             reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
@@ -2996,6 +3056,87 @@ async def confirm_booking(message: Message, state: FSMContext):
             )
             await state.set_state(MenuState.SALES_MAIN)
             return
+        
+        # Вычитаем товары со склада
+        if order.products:
+            for product in order.products:
+                # Проверяем наличие товара на складе
+                finished_product = db.query(FinishedProduct).join(
+                    Film, FinishedProduct.film_id == Film.id
+                ).filter(
+                    Film.code == product.color,
+                    FinishedProduct.thickness == product.thickness
+                ).first()
+                
+                if finished_product:
+                    if finished_product.quantity >= product.quantity:
+                        # Уменьшаем количество на складе
+                        finished_product.quantity -= product.quantity
+                    else:
+                        await message.answer(
+                            f"⚠️ Недостаточно товара на складе: {product.color}, {product.thickness}мм (требуется: {product.quantity}, доступно: {finished_product.quantity}).",
+                            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+                        )
+                        await state.set_state(MenuState.SALES_MAIN)
+                        return
+                else:
+                    await message.answer(
+                        f"⚠️ Товар не найден на складе: {product.color}, {product.thickness}мм.",
+                        reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+                    )
+                    await state.set_state(MenuState.SALES_MAIN)
+                    return
+        
+        # Если есть стыки, проверяем и уменьшаем их количество
+        if order.joints:
+            for joint in order.joints:
+                joint_item = db.query(Joint).filter(
+                    Joint.type == joint.joint_type,
+                    Joint.color == joint.joint_color,
+                    Joint.thickness == joint.joint_thickness
+                ).first()
+                
+                if joint_item:
+                    if joint_item.quantity >= joint.quantity:
+                        # Уменьшаем количество стыков
+                        joint_item.quantity -= joint.quantity
+                    else:
+                        await message.answer(
+                            f"⚠️ Недостаточно стыков на складе: {joint.joint_type.value}, {joint.joint_color}, {joint.joint_thickness}мм (требуется: {joint.quantity}, доступно: {joint_item.quantity}).",
+                            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+                        )
+                        await state.set_state(MenuState.SALES_MAIN)
+                        return
+                else:
+                    await message.answer(
+                        f"⚠️ Стыки не найдены на складе: {joint.joint_type.value}, {joint.joint_color}, {joint.joint_thickness}мм.",
+                        reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+                    )
+                    await state.set_state(MenuState.SALES_MAIN)
+                    return
+        
+        # Если есть клей, уменьшаем его количество
+        if order.glues:
+            total_glue = sum(glue.quantity for glue in order.glues)
+            if total_glue > 0:
+                glue_item = db.query(Glue).first()
+                if glue_item:
+                    if glue_item.quantity >= total_glue:
+                        glue_item.quantity -= total_glue
+                    else:
+                        await message.answer(
+                            f"⚠️ Недостаточно клея на складе (требуется: {total_glue}, доступно: {glue_item.quantity}).",
+                            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+                        )
+                        await state.set_state(MenuState.SALES_MAIN)
+                        return
+                else:
+                    await message.answer(
+                        "⚠️ Клей не найден на складе.",
+                        reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+                    )
+                    await state.set_state(MenuState.SALES_MAIN)
+                    return
         
         # Используем строковое значение напрямую
         order.status = "reserved"
