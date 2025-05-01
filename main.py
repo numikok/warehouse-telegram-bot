@@ -477,29 +477,6 @@ async def button_warehouse_role(message: Message, state: FSMContext):
 async def button_sales_role(message: Message, state: FSMContext):
     await assign_role(message, state, UserRole.SALES_MANAGER, "менеджера по продажам", parse_mode="Markdown")
 
-@dp.message(F.text == "Заказ в Китай")
-async def button_china_order(message: Message, state: FSMContext):
-    # Предварительная проверка прав пользователя
-    db = next(get_db())
-    try:
-        user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
-        if not user or user.role != UserRole.SUPER_ADMIN:
-            await message.answer("У вас нет прав для создания заказа в Китай.", parse_mode="Markdown")
-            return
-            
-        # Устанавливаем состояние для заказа в Китай
-        await state.set_state(MenuState.SUPER_ADMIN_CHINA_ORDER)
-        
-        # Отправляем форму для заказа 
-        await message.answer(
-            "🇨🇳 Создание заказа в Китай\n\n"
-            "Выберите категорию товаров для заказа:",
-            reply_markup=get_menu_keyboard(MenuState.SUPER_ADMIN_CHINA_ORDER),
-            parse_mode="Markdown"
-        )
-    finally:
-        db.close()
-
 @dp.message(F.text == "◀️ Назад")
 async def button_back(message: Message, state: FSMContext):
     """Обработчик кнопки Назад для возврата в предыдущее меню."""
