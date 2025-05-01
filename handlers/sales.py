@@ -3038,20 +3038,14 @@ async def process_booking_order_selection(message: Message, state: FSMContext):
             return
         
         # Проверяем, что заказ имеет статус NEW - только такие заказы можно бронировать
-        if order.status != OrderStatus.NEW.value:
-            status_str = str(order.status)
-            # Если статус является enum объектом, извлекаем его value
-            if hasattr(order.status, 'value'):
-                status_str = str(order.status.value)
-                
+        if order.status != "NEW":
             await message.answer(
-                f"⚠️ Заказ #{order_id} не может быть забронирован, так как его статус: {status_str}. Бронировать можно только заказы со статусом NEW.",
+                f"⚠️ Заказ #{order_id} не может быть забронирован, так как его статус: {order.status}. Бронировать можно только заказы со статусом NEW.",
                 reply_markup=ReplyKeyboardMarkup(
                     keyboard=[[KeyboardButton(text="◀️ Назад")]],
                     resize_keyboard=True
                 )
             )
-            await state.set_state(MenuState.SALES_MAIN)
             return
         
         # Сохраняем ID заказа в контексте состояния
@@ -3162,14 +3156,9 @@ async def confirm_booking(message: Message, state: FSMContext):
             await state.set_state(MenuState.SALES_MAIN)
             return
         
-        if order.status != OrderStatus.NEW.value:
-            status_str = str(order.status)
-            # Если статус является enum объектом, извлекаем его value
-            if hasattr(order.status, 'value'):
-                status_str = str(order.status.value)
-                
+        if order.status != "NEW":
             await message.answer(
-                f"⚠️ Заказ #{order_id} не может быть забронирован, так как его статус: {status_str}. Бронировать можно только заказы со статусом NEW.",
+                f"⚠️ Заказ #{order_id} не может быть забронирован, так как его статус: {order.status}. Бронировать можно только заказы со статусом NEW.",
                 reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
             )
             await state.set_state(MenuState.SALES_MAIN)
@@ -3257,7 +3246,7 @@ async def confirm_booking(message: Message, state: FSMContext):
                     return
         
         # Используем строковое значение напрямую для совместимости с базой данных
-        order.status = OrderStatus.RESERVED.value
+        order.status = "RESERVED"
         
         # Записываем, кто забронировал заказ
         user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
@@ -3336,7 +3325,7 @@ async def handle_reserved_orders(message: Message, state: FSMContext):
             return
         
         # Получаем забронированные заказы
-        query = db.query(Order).filter(Order.status == OrderStatus.RESERVED.value)
+        query = db.query(Order).filter(Order.status == "RESERVED")
         
         # Для обычных менеджеров показываем только их заказы, для админов - все
         if user.role != UserRole.SUPER_ADMIN.value:
