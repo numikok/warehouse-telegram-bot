@@ -2582,12 +2582,16 @@ async def view_reserved_order_sales(message: Message, state: FSMContext):
     if not await check_sales_access(message):
         return
     
+    # Получаем текущие данные из состояния, включая is_admin_context
+    state_data = await state.get_data()
+    is_admin_context = state_data.get("is_admin_context", False)
+    
     try:
         order_id = int(message.text)
     except ValueError:
         await message.answer(
             "Пожалуйста, введите корректный числовой ID.",
-            reply_markup=get_menu_keyboard(MenuState.SALES_RESERVED_ORDERS)
+            reply_markup=get_menu_keyboard(MenuState.SALES_RESERVED_ORDERS, is_admin_context=is_admin_context)
         )
         return
     
@@ -2605,7 +2609,7 @@ async def view_reserved_order_sales(message: Message, state: FSMContext):
         if not order:
             await message.answer(
                 f"Забронированный заказ с ID {order_id} не найден или не имеет статус 'Забронирован'.",
-                reply_markup=get_menu_keyboard(MenuState.SALES_RESERVED_ORDERS)
+                reply_markup=get_menu_keyboard(MenuState.SALES_RESERVED_ORDERS, is_admin_context=is_admin_context)
             )
             return
         
@@ -2652,10 +2656,10 @@ async def view_reserved_order_sales(message: Message, state: FSMContext):
         # Добавляем кнопки для подтверждения или отмены бронирования
         order_details += "\nДля подтверждения или отмены бронирования используйте кнопки ниже:"
         
-        # Создаем инлайн клавиатуру
+        # Создаем инлайн клавиатуру с передачей контекста администратора через callback_data
         kb = InlineKeyboardBuilder()
-        kb.button(text="✅ Оформить заказ", callback_data=f"confirm_reserved:{order.id}")
-        kb.button(text="❌ Отменить", callback_data=f"cancel_reserved:{order.id}")
+        kb.button(text="✅ Оформить заказ", callback_data=f"confirm_reserved:{order.id}:{is_admin_context}")
+        kb.button(text="❌ Отменить", callback_data=f"cancel_reserved:{order.id}:{is_admin_context}")
         kb.adjust(2)  # 2 кнопки в ряд
         
         await message.answer(
@@ -2667,7 +2671,7 @@ async def view_reserved_order_sales(message: Message, state: FSMContext):
         logging.error(f"Ошибка при просмотре забронированного заказа: {e}", exc_info=True)
         await message.answer(
             "Произошла ошибка при загрузке деталей заказа.",
-            reply_markup=get_menu_keyboard(MenuState.SALES_RESERVED_ORDERS)
+            reply_markup=get_menu_keyboard(MenuState.SALES_RESERVED_ORDERS, is_admin_context=is_admin_context)
         )
     finally:
         db.close()
@@ -2677,8 +2681,13 @@ async def process_confirm_reserved_order(callback_query: CallbackQuery, state: F
     """Обработка подтверждения забронированного заказа"""
     await callback_query.answer()
     
-    # Извлекаем ID заказа из callback_data
-    order_id = int(callback_query.data.split(":")[1])
+    # Извлекаем ID заказа и контекст администратора из callback_data
+    callback_data = callback_query.data.split(":")
+    order_id = int(callback_data[1])
+    is_admin_context = callback_data[2].lower() == "true" if len(callback_data) > 2 else False
+    
+    # Сохраняем контекст администратора для следующего состояния
+    await state.update_data(is_admin_context=is_admin_context)
     
     db = next(get_db())
     try:
@@ -2691,7 +2700,7 @@ async def process_confirm_reserved_order(callback_query: CallbackQuery, state: F
         if not order:
             await callback_query.message.answer(
                 "Заказ не найден или уже не имеет статус 'Забронирован'.",
-                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
             )
             await state.set_state(MenuState.SALES_MAIN)
             return
@@ -2701,7 +2710,7 @@ async def process_confirm_reserved_order(callback_query: CallbackQuery, state: F
         if not user or (order.manager_id != user.id and user.role != UserRole.SUPER_ADMIN.value):
             await callback_query.message.answer(
                 "У вас нет прав для управления этим заказом.",
-                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
             )
             await state.set_state(MenuState.SALES_MAIN)
             return
@@ -2712,7 +2721,7 @@ async def process_confirm_reserved_order(callback_query: CallbackQuery, state: F
         
         await callback_query.message.answer(
             f"✅ Заказ #{order_id} подтвержден и отправлен в производство.",
-            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
         )
         await state.set_state(MenuState.SALES_MAIN)
         
@@ -2721,7 +2730,7 @@ async def process_confirm_reserved_order(callback_query: CallbackQuery, state: F
         logging.error(f"Ошибка при подтверждении забронированного заказа {order_id}: {e}", exc_info=True)
         await callback_query.message.answer(
             f"❌ Произошла ошибка при подтверждении заказа: {str(e)}",
-            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
         )
         await state.set_state(MenuState.SALES_MAIN)
     finally:
@@ -2730,7 +2739,13 @@ async def process_confirm_reserved_order(callback_query: CallbackQuery, state: F
 @router.callback_query(lambda c: c.data.startswith("cancel_reserved:"))
 async def process_cancel_reserved_order(callback_query: CallbackQuery, state: FSMContext):
     """Обработчик отмены забронированного заказа"""
-    order_id = int(callback_query.data.split(":")[1])
+    # Извлекаем ID заказа и контекст администратора из callback_data
+    callback_data = callback_query.data.split(":")
+    order_id = int(callback_data[1])
+    is_admin_context = callback_data[2].lower() == "true" if len(callback_data) > 2 else False
+    
+    # Сохраняем контекст администратора для следующего состояния
+    await state.update_data(is_admin_context=is_admin_context)
     
     db = next(get_db())
     try:
@@ -2740,7 +2755,7 @@ async def process_cancel_reserved_order(callback_query: CallbackQuery, state: FS
         if not order:
             await callback_query.message.answer(
                 f"❌ Заказ #{order_id} не найден.",
-                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
             )
             await state.set_state(MenuState.SALES_MAIN)
             return
@@ -2749,7 +2764,7 @@ async def process_cancel_reserved_order(callback_query: CallbackQuery, state: FS
         if order.status != OrderStatus.RESERVED:
             await callback_query.message.answer(
                 f"⚠️ Заказ #{order_id} не может быть отменен, так как его статус: {order.status.value}",
-                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
             )
             await state.set_state(MenuState.SALES_MAIN)
             return
@@ -2759,7 +2774,7 @@ async def process_cancel_reserved_order(callback_query: CallbackQuery, state: FS
         if not user or (order.manager_id != user.id and user.role != UserRole.SUPER_ADMIN.value):
             await callback_query.message.answer(
                 "У вас нет прав для управления этим заказом.",
-                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
             )
             await state.set_state(MenuState.SALES_MAIN)
             return
@@ -2828,7 +2843,7 @@ async def process_cancel_reserved_order(callback_query: CallbackQuery, state: FS
         
         await callback_query.message.answer(
             f"❌ Заказ #{order_id} отменен. Товары возвращены на склад.",
-            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
         )
         await state.set_state(MenuState.SALES_MAIN)
         
@@ -2836,7 +2851,7 @@ async def process_cancel_reserved_order(callback_query: CallbackQuery, state: FS
         db.rollback()
         await callback_query.message.answer(
             f"❌ Произошла ошибка при отмене заказа: {str(e)}",
-            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
         )
         await state.set_state(MenuState.SALES_MAIN)
     finally:
@@ -2847,6 +2862,10 @@ async def handle_booking(message: Message, state: FSMContext):
     """Обработчик для бронирования существующих заказов"""
     if not await check_sales_access(message):
         return
+    
+    # Получаем текущие данные из состояния, включая is_admin_context
+    state_data = await state.get_data()
+    is_admin_context = state_data.get("is_admin_context", False)
     
     db = next(get_db())
     try:
@@ -2863,7 +2882,7 @@ async def handle_booking(message: Message, state: FSMContext):
         if not available_orders:
             await message.answer(
                 "ℹ️ Нет доступных заказов для бронирования.",
-                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
             )
             return
         
@@ -2909,14 +2928,16 @@ async def handle_booking(message: Message, state: FSMContext):
             )
         )
         
+        # Сохраняем контекст администратора для следующего состояния
+        await state.update_data(is_admin_context=is_admin_context)
+        
         # Устанавливаем состояние ожидания выбора заказа для бронирования
         await state.set_state(SalesStates.waiting_for_booking_order_selection)
         
     except Exception as e:
-        logging.error(f"Ошибка при получении списка заказов для бронирования: {e}")
         await message.answer(
             f"⚠️ Произошла ошибка при получении списка заказов: {e}",
-            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
         )
     finally:
         db.close()
@@ -3015,23 +3036,32 @@ async def process_booking_order_selection(message: Message, state: FSMContext):
 @router.message(StateFilter(SalesStates.waiting_for_booking_order_selection), F.text == "◀️ Назад")
 async def booking_back_to_main(message: Message, state: FSMContext):
     """Возврат из выбора заказа в главное меню"""
+    # Получаем текущие данные из состояния, включая is_admin_context
+    state_data = await state.get_data()
+    is_admin_context = state_data.get("is_admin_context", False)
+    
+    # Сохраняем контекст администратора для следующего состояния
+    await state.update_data(is_admin_context=is_admin_context)
+    
     await state.set_state(MenuState.SALES_MAIN)
     await message.answer(
         "Вы вернулись в главное меню.",
-        reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+        reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
     )
 
 @router.message(StateFilter(SalesStates.waiting_for_booking_confirmation), F.text == "✅ Да, забронировать")
 async def confirm_booking(message: Message, state: FSMContext):
     """Обработка подтверждения бронирования заказа"""
-    # Получаем ID заказа из контекста состояния
+    # Получаем ID заказа и другие данные из контекста состояния
     data = await state.get_data()
     order_id = data.get("booking_order_id")
+    # Сохраняем контекст администратора, если он есть
+    is_admin_context = data.get("is_admin_context", False)
     
     if not order_id:
         await message.answer(
             "❌ Ошибка: ID заказа не найден в контексте.",
-            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
         )
         await state.set_state(MenuState.SALES_MAIN)
         return
@@ -3044,7 +3074,7 @@ async def confirm_booking(message: Message, state: FSMContext):
         if not order:
             await message.answer(
                 f"❌ Заказ #{order_id} не найден.",
-                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
             )
             await state.set_state(MenuState.SALES_MAIN)
             return
@@ -3052,7 +3082,7 @@ async def confirm_booking(message: Message, state: FSMContext):
         if order.status != OrderStatus.NEW:
             await message.answer(
                 f"⚠️ Заказ #{order_id} не может быть забронирован, так как его статус: {order.status.value}",
-                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
             )
             await state.set_state(MenuState.SALES_MAIN)
             return
@@ -3075,14 +3105,14 @@ async def confirm_booking(message: Message, state: FSMContext):
                     else:
                         await message.answer(
                             f"⚠️ Недостаточно товара на складе: {product.color}, {product.thickness}мм (требуется: {product.quantity}, доступно: {finished_product.quantity}).",
-                            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+                            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
                         )
                         await state.set_state(MenuState.SALES_MAIN)
                         return
                 else:
                     await message.answer(
                         f"⚠️ Товар не найден на складе: {product.color}, {product.thickness}мм.",
-                        reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+                        reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
                     )
                     await state.set_state(MenuState.SALES_MAIN)
                     return
@@ -3103,14 +3133,14 @@ async def confirm_booking(message: Message, state: FSMContext):
                     else:
                         await message.answer(
                             f"⚠️ Недостаточно стыков на складе: {joint.joint_type.value}, {joint.joint_color}, {joint.joint_thickness}мм (требуется: {joint.quantity}, доступно: {joint_item.quantity}).",
-                            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+                            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
                         )
                         await state.set_state(MenuState.SALES_MAIN)
                         return
                 else:
                     await message.answer(
                         f"⚠️ Стыки не найдены на складе: {joint.joint_type.value}, {joint.joint_color}, {joint.joint_thickness}мм.",
-                        reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+                        reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
                     )
                     await state.set_state(MenuState.SALES_MAIN)
                     return
@@ -3126,14 +3156,14 @@ async def confirm_booking(message: Message, state: FSMContext):
                     else:
                         await message.answer(
                             f"⚠️ Недостаточно клея на складе (требуется: {total_glue}, доступно: {glue_item.quantity}).",
-                            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+                            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
                         )
                         await state.set_state(MenuState.SALES_MAIN)
                         return
                 else:
                     await message.answer(
                         "⚠️ Клей не найден на складе.",
-                        reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+                        reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
                     )
                     await state.set_state(MenuState.SALES_MAIN)
                     return
@@ -3148,10 +3178,13 @@ async def confirm_booking(message: Message, state: FSMContext):
         # Сохраняем изменения
         db.commit()
         
+        # Сохраняем контекст администратора для следующего состояния
+        await state.update_data(is_admin_context=is_admin_context)
+        
         await message.answer(
             f"✅ Заказ #{order_id} успешно забронирован!\n\n"
             f"Вы можете просмотреть забронированные заказы через меню '🔖 Забронированные заказы'.",
-            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
         )
         await state.set_state(MenuState.SALES_MAIN)
         
@@ -3160,7 +3193,7 @@ async def confirm_booking(message: Message, state: FSMContext):
         db.rollback()  # Отменяем все изменения в базе данных в случае ошибки
         await message.answer(
             f"⚠️ Произошла ошибка при бронировании заказа: {e}",
-            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN)
+            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
         )
         await state.set_state(MenuState.SALES_MAIN)
     finally:
@@ -3194,16 +3227,23 @@ async def invalid_booking_confirmation_input(message: Message, state: FSMContext
 
 @router.message(F.text == "🔖 Забронированные заказы", StateFilter(MenuState.SALES_MAIN))
 async def handle_reserved_orders(message: Message, state: FSMContext):
-    """Обработчик для просмотра забронированных заказов менеджера"""
+    """Обработчик просмотра забронированных заказов"""
     if not await check_sales_access(message):
         return
+    
+    # Получаем текущие данные из состояния, включая is_admin_context
+    state_data = await state.get_data()
+    is_admin_context = state_data.get("is_admin_context", False)
     
     await state.set_state(MenuState.SALES_RESERVED_ORDERS)
     db = next(get_db())
     try:
         user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
         if not user:
-            await message.answer("Ошибка: пользователь не найден.")
+            await message.answer(
+                "❌ Ошибка: пользователь не найден в системе.",
+                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
+            )
             return
         
         # Получаем забронированные заказы
@@ -3212,13 +3252,13 @@ async def handle_reserved_orders(message: Message, state: FSMContext):
         # Для обычных менеджеров показываем только их заказы, для админов - все
         if user.role != UserRole.SUPER_ADMIN.value and user.role != UserRole.ADMIN.value:
             query = query.filter(Order.manager_id == user.id)
-            
+        
         reserved_orders = query.order_by(desc(Order.created_at)).all()
         
         if not reserved_orders:
             await message.answer(
-                "Нет забронированных заказов.",
-                reply_markup=get_menu_keyboard(MenuState.SALES_RESERVED_ORDERS)
+                "ℹ️ У вас нет забронированных заказов.",
+                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
             )
             return
         
@@ -3238,7 +3278,7 @@ async def handle_reserved_orders(message: Message, state: FSMContext):
             if order.delivery_address:
                 response += f"Адрес: {order.delivery_address}\n"
             response += "\n---\n"
-        
+                
         response += "\nВыберите ID заказа для просмотра деталей и управления."
         
         if len(response) > 4000:
@@ -3256,6 +3296,9 @@ async def handle_reserved_orders(message: Message, state: FSMContext):
                 
         keyboard_rows.append([KeyboardButton(text="◀️ Назад")])
         
+        # Сохраняем контекст администратора при переходе в новое состояние
+        await state.update_data(is_admin_context=is_admin_context)
+        
         await message.answer(
             response,
             reply_markup=ReplyKeyboardMarkup(
@@ -3265,10 +3308,23 @@ async def handle_reserved_orders(message: Message, state: FSMContext):
         )
         
     except Exception as e:
-        # Удаляем логирование
+        logging.error(f"Ошибка при получении списка забронированных заказов: {e}")
         await message.answer(
-            "Произошла ошибка при загрузке забронированных заказов.",
-            reply_markup=get_menu_keyboard(MenuState.SALES_RESERVED_ORDERS)
+            f"⚠️ Произошла ошибка при получении списка заказов: {e}",
+            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
         )
     finally:
         db.close()
+
+@router.message(StateFilter(SalesStates.waiting_for_reserved_order_selection), F.text == "◀️ Назад")
+async def reserved_orders_back_to_main(message: Message, state: FSMContext):
+    """Возврат из выбора забронированного заказа в главное меню"""
+    # Получаем текущие данные из состояния, включая is_admin_context
+    state_data = await state.get_data()
+    is_admin_context = state_data.get("is_admin_context", False)
+    
+    await state.set_state(MenuState.SALES_MAIN)
+    await message.answer(
+        "Вы вернулись в главное меню.",
+        reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
+    )
