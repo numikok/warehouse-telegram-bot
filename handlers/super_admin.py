@@ -179,7 +179,6 @@ async def handle_china_order_check(message: Message, state: FSMContext):
     if not await check_super_admin_access(message):
         return
     
-    await state.set_state(MenuState.SUPER_ADMIN_CHINA_ORDER)
     db = next(get_db())
     shortages = []
     
@@ -212,7 +211,7 @@ async def handle_china_order_check(message: Message, state: FSMContext):
             response = "🇨🇳 Недостающие материалы для заказа в Китай:\n\n"
             response += "\n".join(shortages)
             
-        await message.answer(response, reply_markup=get_menu_keyboard(MenuState.SUPER_ADMIN_CHINA_ORDER))
+        await message.answer(response, reply_markup=get_menu_keyboard(MenuState.SUPER_ADMIN_MAIN))
             
     except Exception as e:
         logging.error(f"Ошибка при проверке заказа в Китай: {e}", exc_info=True)
