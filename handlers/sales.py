@@ -3044,15 +3044,28 @@ async def process_booking_order_selection(message: Message, state: FSMContext):
         await message.answer(f"Отладка: {status_debug}")
         
         # Проверяем, что заказ имеет статус NEW - только такие заказы можно бронировать
-        if order.status != "NEW":
-            await message.answer(
-                f"⚠️ Заказ #{order_id} не может быть забронирован, так как его статус: {order.status}. Бронировать можно только заказы со статусом NEW.",
-                reply_markup=ReplyKeyboardMarkup(
-                    keyboard=[[KeyboardButton(text="◀️ Назад")]],
-                    resize_keyboard=True
+        if hasattr(order.status, 'value'):
+            # Если order.status - это enum, сравниваем его значение
+            if order.status.value != "NEW":
+                await message.answer(
+                    f"⚠️ Заказ #{order_id} не может быть забронирован, так как его статус: {order.status.value}. Бронировать можно только заказы со статусом NEW.",
+                    reply_markup=ReplyKeyboardMarkup(
+                        keyboard=[[KeyboardButton(text="◀️ Назад")]],
+                        resize_keyboard=True
+                    )
                 )
-            )
-            return
+                return
+        else:
+            # Если order.status - это строка, сравниваем её напрямую
+            if order.status != "NEW":
+                await message.answer(
+                    f"⚠️ Заказ #{order_id} не может быть забронирован, так как его статус: {order.status}. Бронировать можно только заказы со статусом NEW.",
+                    reply_markup=ReplyKeyboardMarkup(
+                        keyboard=[[KeyboardButton(text="◀️ Назад")]],
+                        resize_keyboard=True
+                    )
+                )
+                return
         
         # Сохраняем ID заказа в контексте состояния
         await state.update_data(booking_order_id=order_id)
@@ -3162,13 +3175,24 @@ async def confirm_booking(message: Message, state: FSMContext):
             await state.set_state(MenuState.SALES_MAIN)
             return
         
-        if order.status != "NEW":
-            await message.answer(
-                f"⚠️ Заказ #{order_id} не может быть забронирован, так как его статус: {order.status}. Бронировать можно только заказы со статусом NEW.",
-                reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
-            )
-            await state.set_state(MenuState.SALES_MAIN)
-            return
+        if hasattr(order.status, 'value'):
+            # Если order.status - это enum, сравниваем его значение
+            if order.status.value != "NEW":
+                await message.answer(
+                    f"⚠️ Заказ #{order_id} не может быть забронирован, так как его статус: {order.status.value}. Бронировать можно только заказы со статусом NEW.",
+                    reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
+                )
+                await state.set_state(MenuState.SALES_MAIN)
+                return
+        else:
+            # Если order.status - это строка, сравниваем её напрямую
+            if order.status != "NEW":
+                await message.answer(
+                    f"⚠️ Заказ #{order_id} не может быть забронирован, так как его статус: {order.status}. Бронировать можно только заказы со статусом NEW.",
+                    reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
+                )
+                await state.set_state(MenuState.SALES_MAIN)
+                return
         
         # Вычитаем товары со склада
         if order.products:
