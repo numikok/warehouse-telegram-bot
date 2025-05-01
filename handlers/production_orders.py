@@ -244,7 +244,7 @@ async def handle_my_orders(message: Message, state: FSMContext):
             manager = db.query(User).filter(User.id == order.manager_id).first()
             manager_name = manager.username if manager else "Неизвестный менеджер"
             
-            status = "🆕 Новый" if order.status == OrderStatus.NEW else "🔄 В работе"
+            status = "🆕 Новый" if order.status == OrderStatus.NEW.value else "🔄 В работе"
             message_text += (
                 f"Заказ #{order.id} ({status})\n"
                 f"Менеджер: {manager_name}\n"
@@ -286,7 +286,7 @@ async def handle_order_completed(message: Message, state: FSMContext):
             await message.answer("Заказ не найден.", parse_mode="Markdown")
             return
             
-        if order.status == OrderStatus.COMPLETED:
+        if order.status == OrderStatus.COMPLETED.value:
             await message.answer("Этот заказ уже выполнен.", parse_mode="Markdown")
             return
             
@@ -303,7 +303,7 @@ async def handle_order_completed(message: Message, state: FSMContext):
             return
             
         # Обновляем статус заказа
-        order.status = OrderStatus.COMPLETED
+        order.status = OrderStatus.COMPLETED.value
         order.completed_at = datetime.now()
         order.completed_by = user.id
         db.commit()

@@ -808,7 +808,7 @@ async def process_order_shipment(message: Message, order_id: int):
             return
             
         # Проверяем статус заказа
-        if order.status == OrderStatus.COMPLETED:
+        if order.status == OrderStatus.COMPLETED.value:
             await message.answer(
                 f"❌ Заказ #{order_id} уже выполнен.",
                 reply_markup=get_menu_keyboard(MenuState.WAREHOUSE_MAIN)
@@ -1115,7 +1115,7 @@ async def process_order_shipment(message: Message, order_id: int):
                     logging.error(f"Ошибка при добавлении клея в выполненный заказ: {str(e)}")
             
             # Меняем статус заказа на выполненный
-            order.status = OrderStatus.COMPLETED
+            order.status = OrderStatus.COMPLETED.value
             order.completed_at = datetime.utcnow()
             
             # Сохраняем изменения в базе данных
@@ -1604,7 +1604,7 @@ async def handle_reserved_orders_warehouse(message: Message, state: FSMContext):
     try:
         # Получаем все забронированные заказы со статусом RESERVED
         reserved_orders = db.query(Order).filter(
-            Order.status == OrderStatus.RESERVED
+            Order.status == OrderStatus.RESERVED.value
         ).options(
             joinedload(Order.products),
             joinedload(Order.joints),
@@ -1692,7 +1692,7 @@ async def view_reserved_order_warehouse(message: Message, state: FSMContext):
                 joinedload(Order.manager)
             ).filter(
                 Order.id == order_id,
-                Order.status == OrderStatus.RESERVED
+                Order.status == OrderStatus.RESERVED.value
             ).first()
             
             if not order:
@@ -1793,7 +1793,7 @@ async def confirm_reserved_order_warehouse(message: Message, state: FSMContext):
             # Получаем заказ
             order = db.query(Order).filter(
                 Order.id == order_id,
-                Order.status == OrderStatus.RESERVED
+                Order.status == OrderStatus.RESERVED.value
             ).first()
             
             if not order:
@@ -1804,7 +1804,7 @@ async def confirm_reserved_order_warehouse(message: Message, state: FSMContext):
                 return
             
             # Меняем статус заказа на NEW
-            order.status = OrderStatus.NEW
+            order.status = OrderStatus.NEW.value
             db.commit()
             
             # Отправляем уведомление менеджеру
@@ -1863,7 +1863,7 @@ async def reject_reserved_order_warehouse(message: Message, state: FSMContext):
             # Получаем заказ
             order = db.query(Order).filter(
                 Order.id == order_id,
-                Order.status == OrderStatus.RESERVED
+                Order.status == OrderStatus.RESERVED.value
             ).first()
             
             if not order:
@@ -1874,7 +1874,7 @@ async def reject_reserved_order_warehouse(message: Message, state: FSMContext):
                 return
             
             # Меняем статус заказа на CANCELLED
-            order.status = OrderStatus.CANCELLED
+            order.status = OrderStatus.CANCELLED.value
             db.commit()
             
             # Отправляем уведомление менеджеру

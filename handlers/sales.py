@@ -888,7 +888,7 @@ async def process_order_confirmation(message: Message, state: FSMContext):
         # Создаем новый заказ
         new_order = Order(
             manager_id=user.id,
-            status=OrderStatus.NEW,
+            status=OrderStatus.NEW.value,
             installation_required=installation_required,
             customer_phone=customer_phone,
             delivery_address=delivery_address,
@@ -2541,7 +2541,7 @@ async def view_completed_order_sales(message: Message, state: FSMContext):
         
         # Получаем забронированные заказы этого менеджера
         reserved_orders = db.query(Order).filter(
-            Order.status == "RESERVED",
+            Order.status == OrderStatus.RESERVED.value,
             Order.manager_id == user.id
         ).order_by(desc(Order.created_at)).all()
         
@@ -2606,7 +2606,7 @@ async def view_reserved_order_sales(message: Message, state: FSMContext):
             joinedload(Order.glues)
         ).filter(
             Order.id == order_id,
-            Order.status == "RESERVED"
+            Order.status == OrderStatus.RESERVED.value
         ).first()
         
         if not order:
@@ -2697,7 +2697,7 @@ async def process_confirm_reserved_order(callback_query: CallbackQuery, state: F
         # Получаем заказ
         order = db.query(Order).filter(
             Order.id == order_id,
-            Order.status == "RESERVED"
+            Order.status == OrderStatus.RESERVED.value
         ).first()
         
         if not order:
@@ -2718,24 +2718,97 @@ async def process_confirm_reserved_order(callback_query: CallbackQuery, state: F
             await state.set_state(MenuState.SALES_MAIN)
             return
         
+        # Возвращаем товары на склад
+        if order.products:
+            for product in order.products:
+                # Находим соответствующий товар на складе
+                finished_product = db.query(FinishedProduct).join(
+                    Film, FinishedProduct.film_id == Film.id
+                ).filter(
+                    Film.code == product.color,
+                    FinishedProduct.thickness == product.thickness
+                ).first()
+                
+                if finished_product:
+                    # Увеличиваем количество на складе
+                    finished_product.quantity += product.quantity
+                else:
+                    # Если такого товара нет, создаем новую запись
+                    film = db.query(Film).filter(Film.code == product.color).first()
+                    if film:
+                        new_product = FinishedProduct(
+                            film_id=film.id,
+                            quantity=product.quantity,
+                            thickness=product.thickness
+                        )
+                        db.add(new_product)
+        
+        # Возвращаем стыки на склад
+        if order.joints:
+            for joint in order.joints:
+                joint_item = db.query(Joint).filter(
+                    Joint.type == joint.joint_type,
+                    Joint.color == joint.joint_color,
+                    Joint.thickness == joint.joint_thickness
+                ).first()
+                
+                if joint_item:
+                    # Увеличиваем количество стыков
+                    joint_item.quantity += joint.quantity
+                else:
+                    # Если таких стыков нет, создаем новую запись
+                    new_joint = Joint(
+                        type=joint.joint_type,
+                        color=joint.joint_color,
+                        thickness=joint.joint_thickness,
+                        quantity=joint.quantity
+                    )
+                    db.add(new_joint)
+        
+        # Возвращаем клей на склад
+        if order.glues:
+            total_glue = sum(glue.quantity for glue in order.glues)
+            if total_glue > 0:
+                glue_item = db.query(Glue).first()
+                if glue_item:
+                    glue_item.quantity += total_glue
+                else:
+                    new_glue = Glue(quantity=total_glue)
+                    db.add(new_glue)
+        
         # Меняем статус заказа на PENDING
-        order.status = OrderStatus.PENDING
+        order.status = OrderStatus.PENDING.value
         db.commit()
         
+        # Убедимся, что используется правильный тип меню в зависимости от роли пользователя
+        menu_state = MenuState.SALES_MAIN
+        if user.role == UserRole.WAREHOUSE.value and not is_admin_context:
+            menu_state = MenuState.WAREHOUSE_MAIN
+        elif user.role == UserRole.PRODUCTION.value and not is_admin_context:
+            menu_state = MenuState.PRODUCTION_MAIN
+            
         await callback_query.message.answer(
-            f"✅ Заказ #{order_id} подтвержден и отправлен в производство.",
-            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
+            f"✅ Заказ #{order_id} подтвержден и отправлен в производство. Материалы возвращены на склад.",
+            reply_markup=get_menu_keyboard(menu_state, is_admin_context=is_admin_context)
         )
-        await state.set_state(MenuState.SALES_MAIN)
+        await state.set_state(menu_state)
         
     except Exception as e:
         db.rollback()
         logging.error(f"Ошибка при подтверждении забронированного заказа {order_id}: {e}", exc_info=True)
+        
+        # Определяем правильное состояние меню
+        menu_state = MenuState.SALES_MAIN
+        if user and user.role == UserRole.WAREHOUSE.value and not is_admin_context:
+            menu_state = MenuState.WAREHOUSE_MAIN
+        elif user and user.role == UserRole.PRODUCTION.value and not is_admin_context:
+            menu_state = MenuState.PRODUCTION_MAIN
+            
         await callback_query.message.answer(
             f"❌ Произошла ошибка при подтверждении заказа: {str(e)}",
-            reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
+            reply_markup=get_menu_keyboard(menu_state, is_admin_context=is_admin_context)
         )
-        await state.set_state(MenuState.SALES_MAIN)
+        await state.set_state(menu_state)
     finally:
         db.close()
 
@@ -2764,7 +2837,7 @@ async def process_cancel_reserved_order(callback_query: CallbackQuery, state: FS
             return
         
         # Проверяем статус заказа
-        if order.status != "RESERVED":
+        if order.status != OrderStatus.RESERVED.value:
             await callback_query.message.answer(
                 f"⚠️ Заказ #{order_id} не может быть отменен, так как его статус: {order.status}",
                 reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
@@ -2841,7 +2914,7 @@ async def process_cancel_reserved_order(callback_query: CallbackQuery, state: FS
                     db.add(new_glue)
         
         # Меняем статус заказа на CANCELLED
-        order.status = OrderStatus.CANCELLED
+        order.status = OrderStatus.CANCELLED.value
         db.commit()
         
         await callback_query.message.answer(
@@ -2879,7 +2952,7 @@ async def handle_booking(message: Message, state: FSMContext):
         
         # Получаем список всех заказов со статусом NEW
         available_orders = db.query(Order).filter(
-            Order.status == OrderStatus.NEW
+            Order.status == OrderStatus.NEW.value
         ).order_by(desc(Order.created_at)).all()
         
         if not available_orders:
@@ -2966,7 +3039,7 @@ async def process_booking_order_selection(message: Message, state: FSMContext):
             return
         
         # Проверяем, что заказ имеет статус NEW
-        if order.status != OrderStatus.NEW:
+        if order.status != OrderStatus.NEW.value:
             await message.answer(
                 f"⚠️ Заказ #{order_id} не может быть забронирован, так как его статус: {order.status.value}",
                 reply_markup=ReplyKeyboardMarkup(
@@ -3072,7 +3145,10 @@ async def confirm_booking(message: Message, state: FSMContext):
     db = next(get_db())
     try:
         # Получаем заказ
-        order = db.query(Order).filter(Order.id == order_id).first()
+        order = db.query(Order).filter(
+            Order.id == order_id,
+            Order.status == OrderStatus.RESERVED.value
+        ).first()
         
         if not order:
             await message.answer(
@@ -3082,7 +3158,7 @@ async def confirm_booking(message: Message, state: FSMContext):
             await state.set_state(MenuState.SALES_MAIN)
             return
         
-        if order.status != OrderStatus.NEW:
+        if order.status != OrderStatus.NEW.value:
             await message.answer(
                 f"⚠️ Заказ #{order_id} не может быть забронирован, так как его статус: {order.status.value}",
                 reply_markup=get_menu_keyboard(MenuState.SALES_MAIN, is_admin_context=is_admin_context)
@@ -3172,7 +3248,7 @@ async def confirm_booking(message: Message, state: FSMContext):
                     return
         
         # Используем строковое значение напрямую для совместимости с базой данных
-        order.status = "RESERVED"
+        order.status = OrderStatus.RESERVED.value
         
         # Записываем, кто забронировал заказ
         user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
@@ -3251,7 +3327,7 @@ async def handle_reserved_orders(message: Message, state: FSMContext):
             return
         
         # Получаем забронированные заказы
-        query = db.query(Order).filter(Order.status == "RESERVED")
+        query = db.query(Order).filter(Order.status == OrderStatus.RESERVED.value)
         
         # Для обычных менеджеров показываем только их заказы, для админов - все
         if user.role != UserRole.SUPER_ADMIN.value:

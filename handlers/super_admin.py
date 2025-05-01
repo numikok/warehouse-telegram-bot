@@ -545,7 +545,7 @@ async def handle_shipping_orders(message: Message, state: FSMContext):
             return
         
         # Получаем новые заказы на отгрузку
-        orders = db.query(Order).filter(Order.status == OrderStatus.NEW).all()
+        orders = db.query(Order).filter(Order.status == OrderStatus.NEW.value).all()
         
         report = "📤 Заказы на отгрузку:\n\n"
         
