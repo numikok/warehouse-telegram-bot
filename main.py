@@ -391,8 +391,29 @@ async def button_my_orders(message: Message, state: FSMContext):
 
 @dp.message(F.text == "✅ Завершенные заказы")
 async def button_completed_orders_warehouse(message: Message, state: FSMContext):
-    await state.set_state(MenuState.WAREHOUSE_COMPLETED_ORDERS)
-    await warehouse.handle_completed_orders(message, state)
+    """Handle the 'Completed Orders' button with role checking"""
+    # First check the user's role to determine the correct handler and state
+    db = next(get_db())
+    try:
+        user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
+        if not user:
+            await message.answer("Пользователь не найден. Начните с /start")
+            return
+            
+        # Check user role and current state
+        current_state = await state.get_state()
+        
+        # If user is a sales manager and in sales menu, use the sales handler
+        if user.role == UserRole.SALES_MANAGER and current_state and current_state.startswith("sales_"):
+            # Forward to the sales.py handler which has the proper state filter
+            await sales.handle_completed_orders_sales(message, state)
+            return
+        
+        # Otherwise, use the warehouse handler
+        await state.set_state(MenuState.WAREHOUSE_COMPLETED_ORDERS)
+        await warehouse.handle_completed_orders(message, state)
+    finally:
+        db.close()
 
 @dp.message(F.text == "📥 Приход сырья")
 async def button_income_materials(message: Message, state: FSMContext):
