@@ -3,6 +3,7 @@ from models import Base, User, UserRole
 import logging
 import os
 from dotenv import load_dotenv
+from sqlalchemy import text
 
 # Load environment variables
 load_dotenv()
@@ -35,16 +36,16 @@ def reset_database():
             metadata = Base.metadata
             
             # Disable foreign key checks for PostgreSQL
-            db.execute("SET CONSTRAINTS ALL DEFERRED")
+            db.execute(text("SET CONSTRAINTS ALL DEFERRED"))
             db.commit()
             
             # Truncate all tables
             for table in reversed(metadata.sorted_tables):
                 logger.info(f"Truncating table: {table.name}")
-                db.execute(f'TRUNCATE TABLE {table.name} RESTART IDENTITY CASCADE')
+                db.execute(text(f'TRUNCATE TABLE {table.name} RESTART IDENTITY CASCADE'))
             
             # Re-enable foreign key checks
-            db.execute("SET CONSTRAINTS ALL IMMEDIATE")
+            db.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
             db.commit()
             
             # Recreate admin user if existed
