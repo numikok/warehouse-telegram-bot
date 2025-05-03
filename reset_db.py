@@ -24,11 +24,13 @@ def reset_database():
             logger.info("Starting database reset...")
             
             # Get admin user before deletion if exists
-            admin_user = None
+            admin_username = None
             if admin_id > 0:
                 admin_user = db.query(User).filter(User.telegram_id == admin_id).first()
                 if admin_user:
-                    logger.info(f"Found admin user: {admin_user.username} (ID: {admin_user.telegram_id})")
+                    # Store only necessary information
+                    admin_username = admin_user.username
+                    logger.info(f"Found admin user: {admin_username} (ID: {admin_id})")
                 else:
                     logger.warning(f"Admin user with ID {admin_id} not found")
             
@@ -49,11 +51,11 @@ def reset_database():
             db.commit()
             
             # Recreate admin user if existed
-            if admin_user:
+            if admin_username and admin_id > 0:
                 logger.info(f"Recreating admin user with ID {admin_id}")
                 new_admin = User(
                     telegram_id=admin_id,
-                    username=admin_user.username,
+                    username=admin_username,
                     role=UserRole.SUPER_ADMIN
                 )
                 db.add(new_admin)
