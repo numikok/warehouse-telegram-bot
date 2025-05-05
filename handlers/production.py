@@ -2193,6 +2193,9 @@ async def process_panel_quantity(message: Message, state: FSMContext):
             # Проверяем, есть ли уже панели с такой толщиной
             panel = db.query(Panel).filter(Panel.thickness == thickness).first()
             
+            # Инициализируем previous_quantity до условных блоков
+            previous_quantity = 0
+            
             if panel:
                 # Если панели существуют, увеличиваем их количество
                 previous_quantity = panel.quantity
@@ -2214,7 +2217,7 @@ async def process_panel_quantity(message: Message, state: FSMContext):
                 quantity=quantity,
                 details=json.dumps({
                     "panel_thickness": thickness,
-                    "previous_quantity": previous_quantity if panel else 0,
+                    "previous_quantity": previous_quantity,
                     "new_quantity": panel.quantity
                 })
             )
