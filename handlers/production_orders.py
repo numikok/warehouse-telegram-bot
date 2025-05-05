@@ -8,6 +8,7 @@ from database import get_db
 import logging
 from datetime import datetime
 from navigation import MenuState, get_menu_keyboard
+import json
 
 router = Router()
 
@@ -291,9 +292,9 @@ async def handle_order_completed(message: Message, state: FSMContext):
             return
             
         # Проверяем наличие достаточного количества панелей
-        panels_available = db.query(Panel).filter(Panel.status == "empty", Panel.thickness == order.panel_thickness).count()
-        if panels_available < order.panel_quantity:
-            await message.answer("Недостаточно пустых панелей на складе для выполнения заказа.", parse_mode="Markdown")
+        panels_available = db.query(Panel).filter(Panel.thickness == order.panel_thickness).first()
+        if not panels_available or panels_available.quantity < order.panel_quantity:
+            await message.answer("Недостаточно панелей на складе для выполнения заказа.", parse_mode="Markdown")
             return
             
         # Проверяем наличие пленки выбранного цвета
@@ -331,38 +332,44 @@ async def handle_order_completed(message: Message, state: FSMContext):
             except Exception as e:
                 logging.error(f"Ошибка отправки уведомления менеджеру: {e}")
         
-        # Добавляем готовую продукцию на склад
-        for _ in range(order.panel_quantity):
-            # Находим пустую панель подходящей толщины
-            panel = db.query(Panel).filter(
-                Panel.status == "empty",
-                Panel.thickness == order.panel_thickness
-            ).first()
-            
-            if panel:
-                # Создаем готовый продукт
-                finished_product = FinishedProduct(
-                    panel_id=panel.id,
-                    film_id=film.id,
-                    thickness=order.panel_thickness,
-                    created_by=user.id,
-                    order_id=order.id
-                )
-                db.add(finished_product)
-                
-                # Обновляем статус панели
-                panel.status = "used"
-                
-                # Записываем операцию в лог
-                operation = Operation(
-                    user_id=user.id,
-                    action=f"Создан готовый товар #{finished_product.id} из заказа #{order.id}",
-                    object_type="FinishedProduct",
-                    object_id=finished_product.id
-                )
-                db.add(operation)
+        # Уменьшаем количество панелей
+        panels_available.quantity -= order.panel_quantity
         
+        # Добавляем операцию в журнал
+        operation = Operation(
+            user_id=user.id,
+            operation_type=OperationType.PRODUCTION.value,
+            quantity=order.panel_quantity,
+            details=json.dumps({
+                "order_id": order.id,
+                "film_color": order.film_color,
+                "panel_thickness": order.panel_thickness
+            })
+        )
+        db.add(operation)
+        
+        # Добавляем готовую продукцию на склад
+        finished_product_exists = db.query(FinishedProduct).filter(
+            FinishedProduct.film_id == film.id,
+            FinishedProduct.thickness == order.panel_thickness
+        ).first()
+        
+        if finished_product_exists:
+            finished_product_exists.quantity += order.panel_quantity
+        else:
+            finished_product = FinishedProduct(
+                film_id=film.id,
+                quantity=order.panel_quantity,
+                thickness=order.panel_thickness
+            )
+            db.add(finished_product)
+        
+        # Обновляем количество оставшейся пленки
+        film.total_remaining -= film.panel_consumption * order.panel_quantity
+        if film.total_remaining < 0:
+            film.total_remaining = 0
+            
         db.commit()
         
     finally:
-        db.close() 
+        db.close()
