@@ -303,73 +303,84 @@ async def handle_order_completed(message: Message, state: FSMContext):
             await message.answer("Пленка с таким цветом не найдена.", parse_mode="Markdown")
             return
             
-        # Обновляем статус заказа
-        order.status = OrderStatus.COMPLETED.value
-        order.completed_at = datetime.now()
-        order.completed_by = user.id
-        db.commit()
-        
-        await message.answer(
-            f"✅ Заказ #{order.id} отмечен как выполненный!\n"
-            f"Производство {order.panel_quantity} панелей с пленкой {order.film_color} завершено.\n\n"
-            f"Не забудьте обновить остатки пленки в складской системе.",
-            parse_mode="Markdown"
-        )
-        
-        # Уведомляем отдел продаж
-        manager = db.query(User).filter(User.id == order.manager_id).first()
-        if manager:
-            try:
-                await message.bot.send_message(
-                    manager.telegram_id,
-                    f"✅ Заказ #{order.id} на производство выполнен!\n"
-                    f"Толщина панелей: {order.panel_thickness} мм\n"
-                    f"Количество панелей: {order.panel_quantity}\n"
-                    f"Цвет пленки: {order.film_color}\n\n"
-                    f"Готовые товары добавлены на склад.",
-                    parse_mode="Markdown"
-                )
-            except Exception as e:
-                logging.error(f"Ошибка отправки уведомления менеджеру: {e}")
-        
-        # Уменьшаем количество панелей
-        panels_available.quantity -= order.panel_quantity
-        
-        # Добавляем операцию в журнал
-        operation = Operation(
-            user_id=user.id,
-            operation_type=OperationType.PRODUCTION.value,
-            quantity=order.panel_quantity,
-            details=json.dumps({
-                "order_id": order.id,
-                "film_color": order.film_color,
-                "panel_thickness": order.panel_thickness
-            })
-        )
-        db.add(operation)
-        
-        # Добавляем готовую продукцию на склад
-        finished_product_exists = db.query(FinishedProduct).filter(
-            FinishedProduct.film_id == film.id,
-            FinishedProduct.thickness == order.panel_thickness
-        ).first()
-        
-        if finished_product_exists:
-            finished_product_exists.quantity += order.panel_quantity
-        else:
-            finished_product = FinishedProduct(
-                film_id=film.id,
-                quantity=order.panel_quantity,
-                thickness=order.panel_thickness
-            )
-            db.add(finished_product)
-        
-        # Обновляем количество оставшейся пленки
-        film.total_remaining -= film.panel_consumption * order.panel_quantity
-        if film.total_remaining < 0:
-            film.total_remaining = 0
+        try:
+            # Используем явную транзакцию
+            # Обновляем статус заказа
+            order.status = OrderStatus.COMPLETED.value
+            order.completed_at = datetime.now()
             
-        db.commit()
-        
+            # Уменьшаем количество панелей
+            logging.info(f"Уменьшаем количество панелей с {panels_available.quantity} на {panels_available.quantity - order.panel_quantity}")
+            panels_available.quantity -= order.panel_quantity
+            
+            # Добавляем операцию в журнал
+            operation = Operation(
+                user_id=user.id,
+                operation_type=OperationType.PRODUCTION.value,
+                quantity=order.panel_quantity,
+                details=json.dumps({
+                    "order_id": order.id,
+                    "film_color": order.film_color,
+                    "panel_thickness": order.panel_thickness
+                })
+            )
+            db.add(operation)
+            
+            # Добавляем готовую продукцию на склад
+            finished_product_exists = db.query(FinishedProduct).filter(
+                FinishedProduct.film_id == film.id,
+                FinishedProduct.thickness == order.panel_thickness
+            ).first()
+            
+            if finished_product_exists:
+                logging.info(f"Обновляем существующую готовую продукцию: было {finished_product_exists.quantity}, добавляем {order.panel_quantity}")
+                finished_product_exists.quantity += order.panel_quantity
+            else:
+                logging.info(f"Создаем новую готовую продукцию с количеством {order.panel_quantity}")
+                finished_product = FinishedProduct(
+                    film_id=film.id,
+                    quantity=order.panel_quantity,
+                    thickness=order.panel_thickness
+                )
+                db.add(finished_product)
+            
+            # Обновляем количество оставшейся пленки
+            film_consumption = film.panel_consumption * order.panel_quantity
+            logging.info(f"Уменьшаем количество пленки с {film.total_remaining} на {film_consumption}")
+            film.total_remaining -= film_consumption
+            if film.total_remaining < 0:
+                film.total_remaining = 0
+                
+            # Фиксируем все изменения
+            db.commit()
+            logging.info(f"Транзакция успешно завершена для заказа #{order.id}")
+            
+            await message.answer(
+                f"✅ Заказ #{order.id} отмечен как выполненный!\n"
+                f"Производство {order.panel_quantity} панелей с пленкой {order.film_color} завершено.\n\n"
+                f"Готовая продукция добавлена на склад.",
+                parse_mode="Markdown"
+            )
+            
+            # Уведомляем отдел продаж
+            manager = db.query(User).filter(User.id == order.manager_id).first()
+            if manager:
+                try:
+                    await message.bot.send_message(
+                        manager.telegram_id,
+                        f"✅ Заказ #{order.id} на производство выполнен!\n"
+                        f"Толщина панелей: {order.panel_thickness} мм\n"
+                        f"Количество панелей: {order.panel_quantity}\n"
+                        f"Цвет пленки: {order.film_color}\n\n"
+                        f"Готовые товары добавлены на склад.",
+                        parse_mode="Markdown"
+                    )
+                except Exception as e:
+                    logging.error(f"Ошибка отправки уведомления менеджеру: {e}")
+                    
+        except Exception as e:
+            db.rollback()
+            logging.error(f"Ошибка при обработке заказа #{order.id}: {str(e)}")
+            await message.answer(f"Произошла ошибка при обработке заказа: {str(e)}", parse_mode="Markdown")
     finally:
         db.close()
