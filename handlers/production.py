@@ -568,7 +568,6 @@ async def process_panel_consumption(message: Message, state: FSMContext):
         # Получаем сохраненные данные
         data = await state.get_data()
         film_code = data.get('film_code')
-        film_thickness = data.get('film_thickness', 0.5)  # Получаем толщину пленки, по умолчанию 0.5
         film_quantity = data.get('film_quantity')
         meters = data.get('film_meters')
         
@@ -589,7 +588,6 @@ async def process_panel_consumption(message: Message, state: FSMContext):
                     code=film_code,
                     panel_consumption=panel_consumption,  # Используем введенное значение расхода
                     meters_per_roll=meters,               # Используем введенное значение метража в рулоне
-                    thickness=film_thickness,             # Используем введенное значение толщины
                     total_remaining=total_meters
                 )
                 db.add(film)
@@ -602,9 +600,6 @@ async def process_panel_consumption(message: Message, state: FSMContext):
                 
                 # Обновляем расход на панель, принимая новое значение
                 film.panel_consumption = panel_consumption
-                
-                # Обновляем толщину пленки, если она изменилась
-                film.thickness = film_thickness
             
             # Создаем запись об операции
             operation = Operation(
@@ -613,7 +608,6 @@ async def process_panel_consumption(message: Message, state: FSMContext):
                 quantity=film_quantity,
                 details=json.dumps({
                     "film_code": film_code,
-                    "film_thickness": film_thickness,
                     "rolls": film_quantity,
                     "meters_per_roll": meters,
                     "panel_consumption": panel_consumption,
@@ -634,13 +628,11 @@ async def process_panel_consumption(message: Message, state: FSMContext):
             await message.answer(
                 f"✅ Приход оформлен!\n"
                 f"Пленка: {film_code}\n"
-                f"Толщина: {film_thickness} мм\n"
                 f"Количество рулонов: {film_quantity}\n"
                 f"Метраж одного рулона: {meters}м\n"
                 f"Расход на панель: {panel_consumption}м\n"
                 f"Общий метраж: {total_meters}м\n\n"
-                f"Теперь у вас {film.total_remaining}м пленки {film_code}"
-                f" (толщина: {film_thickness} мм)",
+                f"Теперь у вас {film.total_remaining}м пленки {film_code}",
                 reply_markup=keyboard
             )
         finally:
