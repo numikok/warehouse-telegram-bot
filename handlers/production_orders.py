@@ -45,7 +45,7 @@ async def handle_production_order(message: Message, state: FSMContext):
     db = next(get_db())
     try:
         user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
-        if not user or user.role != UserRole.SALES_MANAGER:
+        if not user or (user.role != UserRole.SALES_MANAGER and user.role != UserRole.SUPER_ADMIN):
             await message.answer("У вас нет прав для создания заказов на производство.", parse_mode="Markdown")
             return
             
