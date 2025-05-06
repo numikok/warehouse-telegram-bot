@@ -1056,25 +1056,34 @@ async def handle_production(message: Message, state: FSMContext):
 @router.message(ProductionStates.waiting_for_production_panel_thickness)
 async def process_production_panel_thickness(message: Message, state: FSMContext):
     if message.text == "◀️ Назад":
-        await state.set_state(MenuState.PRODUCTION_MAIN)
-        keyboard = await get_role_menu_keyboard(MenuState.PRODUCTION_MAIN, message, state)
-        await message.answer("Выберите действие:", reply_markup=keyboard)
+        # Возвращаемся к выбору типа операции
+        keyboard = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="📦 Остатки")],
+                [KeyboardButton(text="◀️ Назад")]
+            ],
+            resize_keyboard=True
+        )
+        
+        await message.answer(
+            "Выберите действие:",
+            reply_markup=keyboard
+        )
+        
+        await state.set_state(None)
         return
     
     try:
-        thickness = float(message.text.strip())
-        if thickness not in [0.5, 0.8]:
-            await message.answer("Пожалуйста, выберите толщину 0.5 или 0.8 мм.")
-            return
+        thickness = float(message.text)
         
-        # Проверяем, есть ли в базе пустые панели с указанной толщиной
         db = next(get_db())
         try:
+            # Проверяем наличие панелей заданной толщины
             panel = db.query(Panel).filter(Panel.thickness == thickness).first()
             
-            if not panel or panel.quantity <= 0:
+            if not panel or panel.quantity == 0:
                 await message.answer(
-                    f"В базе нет панелей толщиной {thickness} мм для производства.\n"
+                    f"Панели толщиной {thickness} мм отсутствуют на складе.\n"
                     f"Сначала добавьте панели через меню 'Приход сырья'.",
                     reply_markup=get_menu_keyboard(MenuState.PRODUCTION_MAIN)
                 )
@@ -1095,12 +1104,14 @@ async def process_production_panel_thickness(message: Message, state: FSMContext
                 return
                 
             # Формируем кнопки для выбора цвета пленки
+            available_films = []
             keyboard_rows = []
             for film in films:
                 # Рассчитываем, сколько панелей можно произвести из доступной пленки
                 possible_panels = film.calculate_possible_panels()
                 if possible_panels > 0:  # Показываем только те цвета, для которых хватает пленки
                     keyboard_rows.append([KeyboardButton(text=film.code)])
+                    available_films.append(film)
             
             # Добавляем кнопку "Назад"
             keyboard_rows.append([KeyboardButton(text="◀️ Назад")])
@@ -1110,21 +1121,40 @@ async def process_production_panel_thickness(message: Message, state: FSMContext
                 resize_keyboard=True
             )
             
-            # Формируем список доступных пленок с информацией
-            film_info = []
-            for film in films:
-                possible_panels = film.calculate_possible_panels()
-                film_info.append(
-                    f"- {film.code}: {film.total_remaining:.2f}м (хватит на ~{possible_panels} панелей)"
+            # Ограничиваем количество информации в сообщении
+            if len(available_films) == 0:
+                await message.answer(
+                    "Недостаточно пленки для производства. Добавьте пленку через меню 'Приход сырья'.",
+                    reply_markup=get_menu_keyboard(MenuState.PRODUCTION_MAIN)
                 )
-            
-            film_info_text = "\n".join(film_info)
-            
-            await message.answer(
-                f"Выберите цвет пленки для производства:\n\n"
-                f"Доступные пленки:\n{film_info_text}",
-                reply_markup=keyboard
-            )
+                return
+                
+            if len(available_films) <= 10:
+                # Если фильмов не много, показываем подробную информацию
+                film_info = []
+                for film in available_films:
+                    possible_panels = film.calculate_possible_panels()
+                    film_info.append(
+                        f"- {film.code}: {film.total_remaining:.2f}м (≈{possible_panels} панелей)"
+                    )
+                
+                film_info_text = "\n".join(film_info)
+                
+                await message.answer(
+                    f"Выберите цвет пленки для производства:\n\n"
+                    f"Доступные пленки:\n{film_info_text}",
+                    reply_markup=keyboard
+                )
+            else:
+                # Если фильмов много, показываем только количество и несколько примеров
+                film_codes = [film.code for film in available_films[:5]]
+                codes_text = ", ".join(film_codes)
+                
+                await message.answer(
+                    f"Выберите цвет пленки для производства:\n\n"
+                    f"Доступно {len(available_films)} цветов пленки, например: {codes_text} и другие.",
+                    reply_markup=keyboard
+                )
             
             await state.set_state(ProductionStates.waiting_for_production_film_color)
             
@@ -1230,12 +1260,14 @@ async def process_production_quantity(message: Message, state: FSMContext):
             films = db.query(Film).all()
             
             # Формируем кнопки для выбора цвета пленки
+            available_films = []
             keyboard_rows = []
             for film in films:
                 # Рассчитываем, сколько панелей можно произвести из доступной пленки
                 possible_panels = film.calculate_possible_panels()
                 if possible_panels > 0:  # Показываем только те цвета, для которых хватает пленки
                     keyboard_rows.append([KeyboardButton(text=film.code)])
+                    available_films.append(film)
             
             # Добавляем кнопку "Назад"
             keyboard_rows.append([KeyboardButton(text="◀️ Назад")])
@@ -1245,21 +1277,33 @@ async def process_production_quantity(message: Message, state: FSMContext):
                 resize_keyboard=True
             )
             
-            # Формируем список доступных пленок с информацией
-            film_info = []
-            for film in films:
-                possible_panels = film.calculate_possible_panels()
-                film_info.append(
-                    f"- {film.code}: {film.total_remaining:.2f}м (хватит на ~{possible_panels} панелей)"
+            # Ограничиваем количество информации в сообщении
+            if len(available_films) <= 10:
+                # Если фильмов не много, показываем подробную информацию
+                film_info = []
+                for film in available_films:
+                    possible_panels = film.calculate_possible_panels()
+                    film_info.append(
+                        f"- {film.code}: {film.total_remaining:.2f}м (≈{possible_panels} панелей)"
+                    )
+                
+                film_info_text = "\n".join(film_info)
+                
+                await message.answer(
+                    f"Выберите цвет пленки для производства:\n\n"
+                    f"Доступные пленки:\n{film_info_text}",
+                    reply_markup=keyboard
                 )
-            
-            film_info_text = "\n".join(film_info)
-            
-            await message.answer(
-                f"Выберите цвет пленки для производства:\n\n"
-                f"Доступные пленки:\n{film_info_text}",
-                reply_markup=keyboard
-            )
+            else:
+                # Если фильмов много, показываем только количество и несколько примеров
+                film_codes = [film.code for film in available_films[:5]]
+                codes_text = ", ".join(film_codes)
+                
+                await message.answer(
+                    f"Выберите цвет пленки для производства:\n\n"
+                    f"Доступно {len(available_films)} цветов пленки, например: {codes_text} и другие.",
+                    reply_markup=keyboard
+                )
         finally:
             db.close()
             
