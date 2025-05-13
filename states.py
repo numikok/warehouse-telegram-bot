@@ -36,6 +36,11 @@ class ProductionStates(StatesGroup):
     waiting_for_defect_film_meters = State()
     waiting_for_defect_glue_quantity = State()
     
+    # Состояния для брака готовой продукции
+    waiting_for_defect_finished_product_thickness = State()
+    waiting_for_defect_finished_product_film = State()
+    waiting_for_defect_finished_product_quantity = State()
+    
     # Состояния для управления заказами
     waiting_for_order_id_to_complete = State()
     

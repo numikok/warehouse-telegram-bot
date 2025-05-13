@@ -1123,20 +1123,20 @@ async def process_production_panel_thickness(message: Message, state: FSMContext
                 
             if len(available_films) <= 10:
                 # Если фильмов не много, показываем подробную информацию
-                film_info = []
+            film_info = []
                 for film in available_films:
-                    possible_panels = film.calculate_possible_panels()
-                    film_info.append(
+                possible_panels = film.calculate_possible_panels()
+                film_info.append(
                         f"- {film.code}: {film.total_remaining:.2f}м (≈{possible_panels} панелей)"
-                    )
-                
-                film_info_text = "\n".join(film_info)
-                
-                await message.answer(
-                    f"Выберите цвет пленки для производства:\n\n"
-                    f"Доступные пленки:\n{film_info_text}",
-                    reply_markup=keyboard
                 )
+            
+            film_info_text = "\n".join(film_info)
+            
+            await message.answer(
+                f"Выберите цвет пленки для производства:\n\n"
+                f"Доступные пленки:\n{film_info_text}",
+                reply_markup=keyboard
+            )
             else:
                 # Если фильмов много, показываем только количество и несколько примеров
                 film_codes = [film.code for film in available_films[:5]]
@@ -1272,20 +1272,20 @@ async def process_production_quantity(message: Message, state: FSMContext):
             # Ограничиваем количество информации в сообщении
             if len(available_films) <= 10:
                 # Если фильмов не много, показываем подробную информацию
-                film_info = []
+            film_info = []
                 for film in available_films:
-                    possible_panels = film.calculate_possible_panels()
-                    film_info.append(
+                possible_panels = film.calculate_possible_panels()
+                film_info.append(
                         f"- {film.code}: {film.total_remaining:.2f}м (≈{possible_panels} панелей)"
-                    )
-                
-                film_info_text = "\n".join(film_info)
-                
-                await message.answer(
-                    f"Выберите цвет пленки для производства:\n\n"
-                    f"Доступные пленки:\n{film_info_text}",
-                    reply_markup=keyboard
                 )
+            
+            film_info_text = "\n".join(film_info)
+            
+            await message.answer(
+                f"Выберите цвет пленки для производства:\n\n"
+                f"Доступные пленки:\n{film_info_text}",
+                reply_markup=keyboard
+            )
             else:
                 # Если фильмов много, показываем только количество и несколько примеров
                 film_codes = [film.code for film in available_films[:5]]
@@ -2145,6 +2145,9 @@ async def debug_defect_type_handler(message: Message, state: FSMContext):
     elif message.text == "🧴 Клей":
         logging.info("Обнаружена кнопка 'Клей', вызываем обработчик вручную")
         await process_glue_defect(message, state)
+    elif message.text == "✅ Готовая панель":
+        logging.info("Обнаружена кнопка 'Готовая панель', вызываем обработчик для брака готовой продукции")
+        await handle_finished_product_defect(message, state)
     else:
         logging.info(f"Неизвестная кнопка: '{message.text}'")
         await message.answer("Пожалуйста, выберите тип брака из предложенных вариантов.")
@@ -2287,3 +2290,296 @@ async def handle_stock(message: Message, state: FSMContext):
     from handlers.warehouse import cmd_stock 
     logging.info(f"Production handle_stock вызван, вызываем cmd_stock из warehouse")
     await cmd_stock(message, state) # Передаем state
+
+@router.message(ProductionStates.waiting_for_defect_type, F.text == "✅ Готовая панель")
+async def handle_finished_product_defect(message: Message, state: FSMContext):
+    """Обработка брака готовой продукции"""
+    logging.info("Специальный обработчик для брака готовой продукции вызван")
+    
+    # Запрашиваем толщину бракованной готовой продукции
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="0.5")],
+            [KeyboardButton(text="0.8")],
+            [KeyboardButton(text="◀️ Назад")]
+        ],
+        resize_keyboard=True
+    )
+    
+    await message.answer(
+        "Выберите толщину бракованных готовых панелей (мм):",
+        reply_markup=keyboard
+    )
+    
+    # Устанавливаем тип дефекта
+    await state.update_data(defect_type="finished_product_defect")
+    logging.info("Установлен тип дефекта: finished_product_defect")
+    
+    await state.set_state(ProductionStates.waiting_for_defect_finished_product_thickness)
+    logging.info("Установлено состояние: waiting_for_defect_finished_product_thickness")
+
+@router.message(ProductionStates.waiting_for_defect_finished_product_thickness)
+async def process_defect_finished_product_thickness(message: Message, state: FSMContext):
+    """Обработка выбора толщины бракованной готовой продукции"""
+    logging.info(f"Обработка выбора толщины бракованных готовых панелей: '{message.text}'")
+    
+    if message.text == "◀️ Назад":
+        logging.info("Пользователь нажал Назад")
+        await message.answer(
+            "Выберите тип брака:",
+            reply_markup=get_menu_keyboard(MenuState.PRODUCTION_DEFECT)
+        )
+        await state.set_state(ProductionStates.waiting_for_defect_type)
+        return
+    
+    try:
+        thickness = float(message.text.strip())
+        if thickness not in [0.5, 0.8]:
+            await message.answer("Пожалуйста, выберите толщину 0.5 или 0.8 мм.")
+            return
+        
+        # Сохраняем толщину в состоянии
+        await state.update_data(panel_thickness=thickness)
+        
+        db = next(get_db())
+        try:
+            # Получаем доступные цвета пленки для готовой продукции с этой толщиной
+            finished_products = db.query(FinishedProduct).join(Film).filter(
+                FinishedProduct.thickness == thickness,
+                FinishedProduct.quantity > 0
+            ).all()
+            
+            if not finished_products:
+                logging.warning(f"В базе нет готовой продукции толщиной {thickness} мм")
+                await message.answer(
+                    f"В базе нет готовой продукции толщиной {thickness} мм.",
+                    reply_markup=get_menu_keyboard(MenuState.PRODUCTION_DEFECT)
+                )
+                return
+            
+            # Формируем клавиатуру с кодами пленки
+            keyboard_rows = []
+            for product in finished_products:
+                keyboard_rows.append([KeyboardButton(text=f"{product.film.code} (остаток: {product.quantity} шт.)")])
+            
+            keyboard_rows.append([KeyboardButton(text="◀️ Назад")])
+            keyboard = ReplyKeyboardMarkup(keyboard=keyboard_rows, resize_keyboard=True)
+            
+            # Формируем текст сообщения
+            films_text = "\n".join([
+                f"- {product.film.code}: {product.quantity} шт."
+                for product in finished_products
+            ])
+            
+            await message.answer(
+                f"Выберите цвет/код бракованной готовой продукции из списка:\n\nДоступные варианты:\n{films_text}",
+                reply_markup=keyboard
+            )
+            
+            logging.info(f"Доступные пленки для брака готовой продукции: {[p.film.code for p in finished_products]}")
+        finally:
+            db.close()
+            
+        await state.set_state(ProductionStates.waiting_for_defect_finished_product_film)
+        logging.info("Установлено состояние: waiting_for_defect_finished_product_film")
+    except ValueError:
+        await message.answer("Пожалуйста, введите корректное число (0.5 или 0.8).")
+
+@router.message(ProductionStates.waiting_for_defect_finished_product_film)
+async def process_defect_finished_product_film(message: Message, state: FSMContext):
+    """Обработка выбора цвета бракованной готовой продукции"""
+    logging.info(f"Обработка выбора цвета бракованной готовой продукции: '{message.text}'")
+    
+    if message.text == "◀️ Назад":
+        logging.info("Пользователь нажал Назад")
+        await message.answer(
+            "Выберите толщину бракованных готовых панелей (мм):",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[
+                    [KeyboardButton(text="0.5")],
+                    [KeyboardButton(text="0.8")],
+                    [KeyboardButton(text="◀️ Назад")]
+                ],
+                resize_keyboard=True
+            )
+        )
+        await state.set_state(ProductionStates.waiting_for_defect_finished_product_thickness)
+        return
+    
+    # Извлекаем код пленки (из формата "Код (остаток: X шт.)")
+    film_text = message.text.strip()
+    if "остаток:" in film_text:
+        # Разделяем по подстроке "остаток" - так мы сохраним скобки в коде пленки
+        film_code = film_text.split("(остаток:")[0].strip()
+        # Удаляем пробел перед (остаток, если он есть
+        if film_code.endswith(" "):
+            film_code = film_code.rstrip()
+        
+        logging.info(f"DEBUG: Extracted film code '{film_code}' from text '{film_text}'")
+    else:
+        film_code = film_text
+    
+    # Сохраняем выбранный код пленки в состоянии
+    await state.update_data(film_code=film_code)
+    
+    data = await state.get_data()
+    thickness = data.get("panel_thickness")
+    
+    db = next(get_db())
+    try:
+        # Ищем готовую продукцию по коду и толщине
+        product = db.query(FinishedProduct).join(Film).filter(
+            Film.code == film_code,
+            FinishedProduct.thickness == thickness,
+            FinishedProduct.quantity > 0
+        ).first()
+        
+        if not product:
+            await message.answer(
+                f"Не найдена готовая продукция с кодом {film_code} и толщиной {thickness} мм или ее количество равно нулю.",
+                reply_markup=get_menu_keyboard(MenuState.PRODUCTION_DEFECT)
+            )
+            return
+        
+        # Запрашиваем количество бракованной продукции
+        await message.answer(
+            f"Введите количество бракованной готовой продукции (доступно: {product.quantity} шт.):",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="◀️ Назад")]],
+                resize_keyboard=True
+            )
+        )
+        logging.info("Запрошено количество бракованной готовой продукции")
+    finally:
+        db.close()
+    
+    await state.set_state(ProductionStates.waiting_for_defect_finished_product_quantity)
+    logging.info("Установлено состояние: waiting_for_defect_finished_product_quantity")
+
+@router.message(ProductionStates.waiting_for_defect_finished_product_quantity)
+async def process_defect_finished_product_quantity(message: Message, state: FSMContext):
+    """Обработка ввода количества бракованной готовой продукции"""
+    logging.info(f"Обработка ввода количества бракованной готовой продукции: '{message.text}'")
+    
+    if message.text == "◀️ Назад":
+        logging.info("Пользователь нажал Назад")
+        data = await state.get_data()
+        thickness = data.get("panel_thickness")
+        
+        db = next(get_db())
+        try:
+            # Получаем доступные цвета пленки для готовой продукции с этой толщиной
+            finished_products = db.query(FinishedProduct).join(Film).filter(
+                FinishedProduct.thickness == thickness,
+                FinishedProduct.quantity > 0
+            ).all()
+            
+            # Формируем клавиатуру с кодами пленки
+            keyboard_rows = []
+            for product in finished_products:
+                keyboard_rows.append([KeyboardButton(text=f"{product.film.code} (остаток: {product.quantity} шт.)")])
+            
+            keyboard_rows.append([KeyboardButton(text="◀️ Назад")])
+            keyboard = ReplyKeyboardMarkup(keyboard=keyboard_rows, resize_keyboard=True)
+            
+            # Формируем текст сообщения
+            films_text = "\n".join([
+                f"- {product.film.code}: {product.quantity} шт."
+                for product in finished_products
+            ])
+            
+            await message.answer(
+                f"Выберите цвет/код бракованной готовой продукции из списка:\n\nДоступные варианты:\n{films_text}",
+                reply_markup=keyboard
+            )
+        finally:
+            db.close()
+        
+        await state.set_state(ProductionStates.waiting_for_defect_finished_product_film)
+        return
+    
+    try:
+        quantity = int(message.text)
+        if quantity <= 0:
+            await message.answer("Количество должно быть положительным числом.")
+            return
+        
+        # Проверяем, что мы в правильном контексте обработки брака
+        data = await state.get_data()
+        logging.info(f"Текущие данные состояния: {data}")
+        
+        defect_type = data.get("defect_type", "")
+        panel_thickness = data.get("panel_thickness", 0.5)
+        film_code = data.get("film_code", "")
+        
+        if defect_type != "finished_product_defect":
+            logging.warning(f"Неправильный тип дефекта: {defect_type}")
+            await message.answer("Произошла ошибка. Пожалуйста, начните процесс заново.")
+            await state.set_state(MenuState.PRODUCTION_MAIN)
+            return
+            
+        db = next(get_db())
+        try:
+            # Ищем готовую продукцию по коду и толщине
+            product = db.query(FinishedProduct).join(Film).filter(
+                Film.code == film_code,
+                FinishedProduct.thickness == panel_thickness
+            ).first()
+            
+            if not product:
+                logging.warning(f"В базе не найдена готовая продукция с кодом {film_code} и толщиной {panel_thickness} мм")
+                await message.answer(f"В базе нет готовой продукции с кодом {film_code} и толщиной {panel_thickness} мм.")
+                return
+            
+            if product.quantity < quantity:
+                logging.warning(f"Недостаточно готовой продукции: запрошено {quantity}, доступно {product.quantity}")
+                await message.answer(
+                    f"Невозможно списать {quantity} единиц готовой продукции, доступно только {product.quantity}."
+                )
+                return
+            
+            # Получаем пользователя из базы данных
+            user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
+            
+            # Уменьшаем количество готовой продукции
+            previous_quantity = product.quantity
+            product.quantity -= quantity
+            logging.info(f"Списываем {quantity} единиц готовой продукции. Было: {previous_quantity}, стало: {product.quantity}")
+            
+            # Создаем запись операции
+            operation = Operation(
+                user_id=user.id,
+                operation_type="finished_product_defect",
+                quantity=quantity,
+                details=json.dumps({
+                    "film_code": film_code,
+                    "panel_thickness": panel_thickness,
+                    "previous_quantity": previous_quantity,
+                    "new_quantity": product.quantity,
+                    "is_defect": True
+                })
+            )
+            logging.info(f"Создаю запись операции: {operation.operation_type}, количество: {operation.quantity}")
+            
+            db.add(operation)
+            db.commit()
+            logging.info("Операция успешно записана в БД")
+            
+            await message.answer(
+                f"✅ Списано {quantity} единиц бракованной готовой продукции:\n"
+                f"• Пленка: {film_code}\n"
+                f"• Толщина: {panel_thickness} мм\n"
+                f"Остаток: {product.quantity} шт.",
+                reply_markup=get_menu_keyboard(MenuState.PRODUCTION_MAIN)
+            )
+            logging.info("Отправлено сообщение об успешном списании")
+            
+        finally:
+            db.close()
+            
+    except ValueError:
+        logging.warning(f"Введено некорректное значение: '{message.text}'")
+        await message.answer("Пожалуйста, введите целое число.")
+        return
+    
+    await state.clear()

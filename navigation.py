@@ -163,6 +163,7 @@ def get_menu_keyboard(menu_state: MenuState, is_admin_context: bool = False) -> 
             [KeyboardButton(text="🎨 Пленка")],
             [KeyboardButton(text="⚙️ Стык")],
             [KeyboardButton(text="🧴 Клей")],
+            [KeyboardButton(text="✅ Готовая панель")],
             [KeyboardButton(text="◀️ Назад")]
         ],
         
