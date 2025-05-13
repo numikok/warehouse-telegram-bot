@@ -590,7 +590,8 @@ async def process_need_joints(message: Message, state: FSMContext):
             "Требуется ли клей?",
             reply_markup=keyboard
         )
-        await state.set_state(SalesStates.waiting_for_order_installation)
+        # Исправляем: переходим в состояние waiting_for_need_glue вместо waiting_for_order_installation
+        await state.set_state(SalesStates.waiting_for_need_glue)
     elif response == "◀️ Назад":
         # Возвращаемся к вопросу о добавлении продуктов
         data = await state.get_data()
@@ -1155,6 +1156,10 @@ async def process_order_glue_needed(message: Message, state: FSMContext):
     logging.info(f"DEBUG: process_order_glue_needed received choice '{user_choice}' from user {message.from_user.id}")
     
     if user_choice == "✅ Да":
+        # Сохраняем информацию о клее
+        await state.update_data(need_glue=True)
+        logging.info(f"DEBUG: User {message.from_user.id} requested glue (need_glue=True) in order_glue_needed")
+        
         # Проверяем наличие клея в базе данных
         db = next(get_db())
         try:
@@ -1194,7 +1199,7 @@ async def process_order_glue_needed(message: Message, state: FSMContext):
             logging.info(f"DEBUG: Current state after transition is {current_state} for user {message.from_user.id}")
             
             if str(current_state) != str(next_state):
-                logging.error(f"ERROR: State transition failed. Expected {next_state}, got {current_state}")
+                logging.error(f"ERROR: State transition failed in process_order_glue_needed. Expected {next_state}, got {current_state}")
                 
         except Exception as e:
             logging.error(f"ERROR in process_order_glue_needed: {str(e)}", exc_info=True)
@@ -1211,8 +1216,8 @@ async def process_order_glue_needed(message: Message, state: FSMContext):
             db.close()
     elif user_choice == "❌ Нет":
         # Клей не нужен, сохраняем нулевое количество
-        await state.update_data(glue_quantity=0)
-        logging.info(f"DEBUG: User {message.from_user.id} did not request glue (glue_quantity=0)")
+        await state.update_data(need_glue=False, glue_quantity=0)
+        logging.info(f"DEBUG: User {message.from_user.id} did not request glue (glue_quantity=0) in order_glue_needed")
         
         # Переходим к запросу о монтаже
         await message.answer(
@@ -1224,7 +1229,9 @@ async def process_order_glue_needed(message: Message, state: FSMContext):
                 resize_keyboard=True
             )
         )
-        await state.set_state(SalesStates.waiting_for_order_installation)
+        next_state = SalesStates.waiting_for_order_installation
+        logging.info(f"DEBUG: Moving to installation question with state {next_state} for user {message.from_user.id}")
+        await state.set_state(next_state)
     else:
         # Некорректный ввод
         await message.answer(
@@ -1268,7 +1275,8 @@ async def process_order_installation(message: Message, state: FSMContext):
             "Пожалуйста, выберите один из предложенных вариантов.",
             reply_markup=ReplyKeyboardMarkup(
                 keyboard=[
-                    [KeyboardButton(text="✅ Да"), KeyboardButton(text="❌ Нет")]
+                    [KeyboardButton(text="✅ Да"), KeyboardButton(text="❌ Нет")],
+                    [KeyboardButton(text="◀️ Назад")]
                 ],
                 resize_keyboard=True
             )

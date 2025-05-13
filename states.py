@@ -109,7 +109,6 @@ class SalesStates(StatesGroup):
     waiting_for_confirmation = State()
     
     # Дополнительные состояния
-    waiting_for_glue_quantity = State()
     waiting_for_installation = State()
     waiting_for_phone = State()
     waiting_for_address = State()
