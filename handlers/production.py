@@ -1123,20 +1123,20 @@ async def process_production_panel_thickness(message: Message, state: FSMContext
                 
             if len(available_films) <= 10:
                 # Если фильмов не много, показываем подробную информацию
-            film_info = []
+                film_info = []
                 for film in available_films:
-                possible_panels = film.calculate_possible_panels()
-                film_info.append(
+                    possible_panels = film.calculate_possible_panels()
+                    film_info.append(
                         f"- {film.code}: {film.total_remaining:.2f}м (≈{possible_panels} панелей)"
+                    )
+            
+                film_info_text = "\n".join(film_info)
+            
+                await message.answer(
+                    f"Выберите цвет пленки для производства:\n\n"
+                    f"Доступные пленки:\n{film_info_text}",
+                    reply_markup=keyboard
                 )
-            
-            film_info_text = "\n".join(film_info)
-            
-            await message.answer(
-                f"Выберите цвет пленки для производства:\n\n"
-                f"Доступные пленки:\n{film_info_text}",
-                reply_markup=keyboard
-            )
             else:
                 # Если фильмов много, показываем только количество и несколько примеров
                 film_codes = [film.code for film in available_films[:5]]
@@ -1272,20 +1272,20 @@ async def process_production_quantity(message: Message, state: FSMContext):
             # Ограничиваем количество информации в сообщении
             if len(available_films) <= 10:
                 # Если фильмов не много, показываем подробную информацию
-            film_info = []
+                film_info = []
                 for film in available_films:
-                possible_panels = film.calculate_possible_panels()
-                film_info.append(
+                    possible_panels = film.calculate_possible_panels()
+                    film_info.append(
                         f"- {film.code}: {film.total_remaining:.2f}м (≈{possible_panels} панелей)"
+                    )
+            
+                film_info_text = "\n".join(film_info)
+            
+                await message.answer(
+                    f"Выберите цвет пленки для производства:\n\n"
+                    f"Доступные пленки:\n{film_info_text}",
+                    reply_markup=keyboard
                 )
-            
-            film_info_text = "\n".join(film_info)
-            
-            await message.answer(
-                f"Выберите цвет пленки для производства:\n\n"
-                f"Доступные пленки:\n{film_info_text}",
-                reply_markup=keyboard
-            )
             else:
                 # Если фильмов много, показываем только количество и несколько примеров
                 film_codes = [film.code for film in available_films[:5]]
