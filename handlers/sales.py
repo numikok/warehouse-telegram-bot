@@ -997,6 +997,7 @@ async def process_need_glue(message: Message, state: FSMContext):
             glue = db.query(Glue).filter(Glue.quantity > 0).first()
             
             if not glue:
+                logging.warning(f"DEBUG: No glue available in database for user {message.from_user.id}")
                 await message.answer(
                     "❌ К сожалению, клей отсутствует на складе.",
                     reply_markup=ReplyKeyboardMarkup(
@@ -1008,6 +1009,7 @@ async def process_need_glue(message: Message, state: FSMContext):
                 )
                 return
             
+            logging.info(f"DEBUG: Asking user {message.from_user.id} for glue quantity. Available: {glue.quantity}")
             await message.answer(
                 f"Введите количество тюбиков клея (доступно: {glue.quantity} шт.):",
                 reply_markup=ReplyKeyboardMarkup(
@@ -1017,7 +1019,30 @@ async def process_need_glue(message: Message, state: FSMContext):
                     resize_keyboard=True
                 )
             )
-            await state.set_state(SalesStates.waiting_for_order_glue_quantity)
+            
+            # Важно: устанавливаем следующее состояние - запрос количества клея
+            next_state = SalesStates.waiting_for_order_glue_quantity
+            logging.info(f"DEBUG: Setting next state to {next_state} for user {message.from_user.id}")
+            await state.set_state(next_state)
+            
+            # Проверка успешности перехода состояния
+            current_state = await state.get_state()
+            logging.info(f"DEBUG: Current state after transition is {current_state} for user {message.from_user.id}")
+            
+            if str(current_state) != str(next_state):
+                logging.error(f"ERROR: State transition failed. Expected {next_state}, got {current_state}")
+                
+        except Exception as e:
+            logging.error(f"ERROR in process_need_glue: {str(e)}", exc_info=True)
+            await message.answer(
+                "Произошла ошибка при обработке запроса. Пожалуйста, попробуйте еще раз.",
+                reply_markup=ReplyKeyboardMarkup(
+                    keyboard=[
+                        [KeyboardButton(text="◀️ Назад")]
+                    ],
+                    resize_keyboard=True
+                )
+            )
         finally:
             db.close()
     elif response == "❌ Нет":
@@ -1047,9 +1072,26 @@ async def process_need_glue(message: Message, state: FSMContext):
 @router.message(SalesStates.waiting_for_order_glue_quantity)
 async def process_order_glue_quantity(message: Message, state: FSMContext):
     """Обработка ввода количества клея"""
+    logging.info(f"DEBUG: process_order_glue_quantity received input '{message.text}' from user {message.from_user.id}")
+    
     try:
+        if message.text.strip() == "◀️ Назад":
+            # Возвращаемся к вопросу о необходимости клея
+            await message.answer(
+                "Нужен ли клей для стыков?",
+                reply_markup=ReplyKeyboardMarkup(
+                    keyboard=[
+                        [KeyboardButton(text="✅ Да"), KeyboardButton(text="❌ Нет")]
+                    ],
+                    resize_keyboard=True
+                )
+            )
+            await state.set_state(SalesStates.waiting_for_need_glue)
+            return
+            
         quantity = int(message.text.strip())
         if quantity <= 0:
+            logging.warning(f"DEBUG: User {message.from_user.id} entered invalid glue quantity: {quantity}")
             await message.answer("❌ Количество должно быть больше 0")
             return
             
@@ -1071,10 +1113,33 @@ async def process_order_glue_quantity(message: Message, state: FSMContext):
                 resize_keyboard=True
             )
         )
-        await state.set_state(SalesStates.waiting_for_order_installation)
+        
+        next_state = SalesStates.waiting_for_order_installation
+        logging.info(f"DEBUG: Setting next state to {next_state} for user {message.from_user.id}")
+        await state.set_state(next_state)
+        
+        # Проверка успешности перехода состояния
+        current_state = await state.get_state()
+        logging.info(f"DEBUG: Current state after transition is {current_state} for user {message.from_user.id}")
+        
+        if str(current_state) != str(next_state):
+            logging.error(f"ERROR: State transition failed. Expected {next_state}, got {current_state}")
+            
     except ValueError:
+        logging.warning(f"DEBUG: User {message.from_user.id} entered non-numeric glue quantity: '{message.text}'")
         await message.answer(
             "Пожалуйста, введите корректное число.",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[
+                    [KeyboardButton(text="◀️ Назад")]
+                ],
+                resize_keyboard=True
+            )
+        )
+    except Exception as e:
+        logging.error(f"ERROR in process_order_glue_quantity: {str(e)}", exc_info=True)
+        await message.answer(
+            "Произошла ошибка при обработке запроса. Пожалуйста, попробуйте еще раз.",
             reply_markup=ReplyKeyboardMarkup(
                 keyboard=[
                     [KeyboardButton(text="◀️ Назад")]
@@ -1087,6 +1152,7 @@ async def process_order_glue_quantity(message: Message, state: FSMContext):
 async def process_order_glue_needed(message: Message, state: FSMContext):
     """Обработка ответа о необходимости клея для стыков"""
     user_choice = message.text.strip()
+    logging.info(f"DEBUG: process_order_glue_needed received choice '{user_choice}' from user {message.from_user.id}")
     
     if user_choice == "✅ Да":
         # Проверяем наличие клея в базе данных
@@ -1095,6 +1161,7 @@ async def process_order_glue_needed(message: Message, state: FSMContext):
             glue = db.query(Glue).filter(Glue.quantity > 0).first()
             
             if not glue:
+                logging.warning(f"DEBUG: No glue available in database for user {message.from_user.id}")
                 await message.answer(
                     "❌ К сожалению, клей отсутствует на складе.",
                     reply_markup=ReplyKeyboardMarkup(
@@ -1106,6 +1173,7 @@ async def process_order_glue_needed(message: Message, state: FSMContext):
                 )
                 return
             
+            logging.info(f"DEBUG: Asking user {message.from_user.id} for glue quantity. Available: {glue.quantity}")
             await message.answer(
                 f"Введите количество тюбиков клея (доступно: {glue.quantity} шт.):",
                 reply_markup=ReplyKeyboardMarkup(
@@ -1115,12 +1183,36 @@ async def process_order_glue_needed(message: Message, state: FSMContext):
                     resize_keyboard=True
                 )
             )
-            await state.set_state(SalesStates.waiting_for_order_glue_quantity)
+            
+            # Важно: устанавливаем следующее состояние - запрос количества клея
+            next_state = SalesStates.waiting_for_order_glue_quantity
+            logging.info(f"DEBUG: Setting next state to {next_state} for user {message.from_user.id}")
+            await state.set_state(next_state)
+            
+            # Проверка успешности перехода состояния
+            current_state = await state.get_state()
+            logging.info(f"DEBUG: Current state after transition is {current_state} for user {message.from_user.id}")
+            
+            if str(current_state) != str(next_state):
+                logging.error(f"ERROR: State transition failed. Expected {next_state}, got {current_state}")
+                
+        except Exception as e:
+            logging.error(f"ERROR in process_order_glue_needed: {str(e)}", exc_info=True)
+            await message.answer(
+                "Произошла ошибка при обработке запроса. Пожалуйста, попробуйте еще раз.",
+                reply_markup=ReplyKeyboardMarkup(
+                    keyboard=[
+                        [KeyboardButton(text="◀️ Назад")]
+                    ],
+                    resize_keyboard=True
+                )
+            )
         finally:
             db.close()
     elif user_choice == "❌ Нет":
         # Клей не нужен, сохраняем нулевое количество
         await state.update_data(glue_quantity=0)
+        logging.info(f"DEBUG: User {message.from_user.id} did not request glue (glue_quantity=0)")
         
         # Переходим к запросу о монтаже
         await message.answer(
