@@ -202,8 +202,14 @@ async def process_selecting_products(message: Message, state: FSMContext):
         return
     
     # Извлекаем код пленки из текста вида "Код (остаток: X шт.)"
-    if "(" in film_text:
-        film_code = film_text.split("(")[0].strip()
+    if "остаток:" in film_text:
+        # Разделяем по подстроке "остаток" - так мы сохраним скобки в коде пленки
+        film_code = film_text.split("(остаток:")[0].strip()
+        # Удаляем пробел перед (остаток, если он есть
+        if film_code.endswith(" "):
+            film_code = film_code.rstrip()
+        
+        logging.info(f"DEBUG: Extracted film code '{film_code}' from text '{film_text}'")
     else:
         film_code = film_text
     
@@ -268,6 +274,8 @@ async def process_product_quantity(message: Message, state: FSMContext):
             
             keyboard_rows = []
             for product in finished_products:
+                # Модифицируем ключ для форматирования текста кнопки
+                # Добавляем пробел перед (остаток:, чтобы сохранить оригинальный код пленки
                 keyboard_rows.append([KeyboardButton(
                     text=f"{product.film.code} (остаток: {product.quantity} шт.)"
                 )])
@@ -1483,7 +1491,12 @@ async def process_order_joint_color(message: Message, state: FSMContext):
         return
     
     # Извлекаем цвет (убираем информацию о количестве)
-    color = user_choice.split(" (")[0]
+    if "остаток:" in user_choice or " шт.)" in user_choice:
+        # Более надежный способ извлечения цвета
+        color = user_choice.split(" (остаток:")[0].strip() if "остаток:" in user_choice else user_choice.split(" (")[0].strip()
+        logging.info(f"DEBUG: Extracted joint color '{color}' from text '{user_choice}'")
+    else:
+        color = user_choice
     
     # Сохраняем выбранный цвет
     await state.update_data(joint_color=color)
